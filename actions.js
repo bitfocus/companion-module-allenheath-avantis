@@ -1,4 +1,4 @@
-const level = require('./level.json')
+const fader = require('./fader.json')
 const avantisConfig = require('./avantisconfig.json')
 
 module.exports = {
@@ -35,9 +35,9 @@ module.exports = {
 		this.CHOICES_FADER = []
 		this.CHOICES_FADER.push({ label: `Step fader +1 dB`, id: 999 })
 		this.CHOICES_FADER.push({ label: `Step fader -1 dB`, id: 998 })
-		for (let i = 0; i < level.level.length; i++) {
-			let dbStr = level.level[i][0];
-			this.CHOICES_FADER.push({ label: `${dbStr} dB`, id: parseInt(level.level[i][1], 16) });
+		for (let i = 0; i < fader.level.length; i++) {
+			let dbStr = fader.level[i][0];
+			this.CHOICES_FADER.push({ label: `${dbStr} dB`, id: parseInt(fader.level[i][1], 16) });
 		}
 
 		// -----------------------

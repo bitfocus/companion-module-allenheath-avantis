@@ -8,7 +8,6 @@
 let tcp = require('../../tcp')
 let instance_skel = require('../../instance_skel')
 let actions = require('./actions')
-const level = require('./level.json')
 const avantisConfig = require('./avantisconfig.json')
 
 const PORT = 51325
@@ -64,10 +63,6 @@ class instance extends instance_skel {
 		};
 
 		result.options = opt;
-		result.hex = {
-			key: opt.channel,
-			val: this.convertNumberToHex(opt.channel)
-		}
 		
 		switch (
 			action.action // Note that only available actions for the type (TCP or MIDI) will be processed
@@ -136,6 +131,8 @@ class instance extends instance_skel {
 				break
 		}
 
+		result.midiOffset = midiOffset;
+
 		if (cmd.buffers.length == 0) {
 
 			// Mute or Fader Level actions
@@ -155,7 +152,7 @@ class instance extends instance_skel {
 					];
 					break;
 
-				case 'fader':
+				case 'fade':
 					// BN, 63, CH, BN, 62, 17, BN, 06, LV
 					let faderLevel = parseInt(opt.level)
 					cmd.buffers = [
@@ -179,8 +176,7 @@ class instance extends instance_skel {
 		for (let i = 0; i < cmd.buffers.length; i++) {
 			if (this.tcpSocket !== undefined) {
 				
-				result.BufferRaw = [...cmd.buffers[i]];
-				result.Buffer = cmd.buffers[i].toString('hex');
+				result.Buffer = this.convertBuffer(cmd.buffers[i].toString('hex'));
 
 				console.log(`------  ${JSON.stringify(result, null, 2)}`);
 
@@ -188,6 +184,21 @@ class instance extends instance_skel {
 				// this.tcpSocket.write(cmd.buffers[i]);
 			}
 		}
+	}
+
+	convertBuffer(buffer) {
+		let val = 0;
+		let result = '';
+		for (let i = 0; i < buffer.length; i++) {
+			if (val == 2) {
+				result += ' ';
+				val = 0;
+			}
+			const element = buffer[i];
+			result += element;
+			val++;
+		}
+		return result;
 	}
 
 	setRouting(ch, selArray, isMute) {
