@@ -56,11 +56,7 @@ class instance extends instance_skel {
 	action(action) {
 		let result = {};
 		var opt = action.options;
-		let midiOffset = 0;
-		let cmd = { 
-			port: PORT, 
-			buffers: []
-		};
+		let bufferCommands = [];
 
 		result.options = opt;
 		
@@ -68,41 +64,41 @@ class instance extends instance_skel {
 			action.action // Note that only available actions for the type (TCP or MIDI) will be processed
 		) {
 			case 'mute_input':
-				cmd.buffers = this.buildMuteBuffer(opt, 0);
+				bufferCommands = this.buildMuteCommand(opt, 0);
 				break;
 
 			case 'fader_input':
-				cmd.buffers = this.buildFaderBuffer(opt, 0);
+				bufferCommands = this.buildFaderCommand(opt, 0);
 				break;
 
 			case 'mute_mono_group':
 			case 'mute_stereo_group':
-				cmd.buffers = this.buildMuteBuffer(opt, 1);
+				bufferCommands = this.buildMuteCommand(opt, 1);
 				break;
 
 			case 'fader_mono_group':
 			case 'fader_stereo_group':
-				cmd.buffers = this.buildFaderBuffer(opt, 1);
+				bufferCommands = this.buildFaderCommand(opt, 1);
 				break;
 
 			case 'mute_mono_aux':
 			case 'mute_stereo_aux':
-				cmd.buffers = this.buildMuteBuffer(opt, 2);
+				bufferCommands = this.buildMuteCommand(opt, 2);
 				break;
 
 			case 'fader_mono_aux':
 			case 'fader_stereo_aux':
-				cmd.buffers = this.buildFaderBuffer(opt, 2);
+				bufferCommands = this.buildFaderCommand(opt, 2);
 				break;
 
 			case 'mute_mono_matrix':
 			case 'mute_stereo_matrix':
-				cmd.buffers = this.buildMuteBuffer(opt, 3);
+				bufferCommands = this.buildMuteCommand(opt, 3);
 				break;
 
 			case 'fader_mono_matrix':
 			case 'fader_stereo_matrix':
-				cmd.buffers = this.buildFaderBuffer(opt, 3);
+				bufferCommands = this.buildFaderCommand(opt, 3);
 				break;
 
 			case 'mute_mono_fx_send':
@@ -110,102 +106,48 @@ class instance extends instance_skel {
 			case 'mute_fx_return':
 			case 'mute_dca':
 			case 'mute_master':
-				cmd.buffers = this.buildMuteBuffer(opt, 4);
+				bufferCommands = this.buildMuteCommand(opt, 4);
 				break;
 
 			case 'fader_DCA':
 			case 'fader_mono_fx_send':
 			case 'fader_stereo_fx_send':
 			case 'fader_fx_return':
-				cmd.buffers = this.buildFaderBuffer(opt, 4);
+				bufferCommands = this.buildFaderCommand(opt, 4);
 				break;
 
 			case 'dca_assign':
 				// BN, 63, CH, BN, 62, 40, BN, 06, DB(DA)
-				cmd.buffers = this.buildAssignBuffer(opt, 4, true);
+				bufferCommands = this.buildAssignCommands(opt, 4, true);
 				break
 
 			case 'mute_assign':
-				// BN, 63, CH, BN, 62, 40, BN, 06, DB(DA)
-				cmd.buffers = this.buildAssignBuffer(opt, 4, false);
+				bufferCommands = this.buildAssignCommands(opt, 4, false);
 				break
 				
 			case 'fader_fx_return':
-				midiOffset = 4;
+				bufferCommands = this.buildFaderCommand(opt, 4);
 				break;
 
 			case 'scene_recall':
-				// BN, 00, Bank, CN, SS
-				let scene = this.scenes[parseInt(opt.sceneNumber)];
-				result.scene = scene;
-				cmd.buffers = [
-					Buffer.from([
-						0xb0 + midiOffset, 
-						0x00, 
-						scene.block, 
-						0xc0 + midiOffset, 
-						scene.ss
-					])
-				];
+				bufferCommands = this.buildSceneCommand(opt, 0);
 				break
 		}
 
-		result.midiOffset = midiOffset;
-
-		if (cmd.buffers.length == 0) {
-
-			// Mute or Fader Level actions
-			switch (action.action.slice(0, 4)) {
-
-				case 'mute':
-					// 9N, CH, 7F(3F), 9N, CH, 00
-					cmd.buffers = [
-						Buffer.from([
-							0x90 + midiOffset, 
-							opt.channel, 
-							opt.mute ? 0x7f : 0x3f, 
-							0x90 + midiOffset, 
-							opt.channel, 
-							0x00
-						])
-					];
-					break;
-
-				case 'fade':
-					// BN, 63, CH, BN, 62, 17, BN, 06, LV
-					let faderLevel = parseInt(opt.level)
-					cmd.buffers = [
-						Buffer.from([
-							0xb0 + midiOffset, 
-							0x63, 
-							opt.channel, 
-							0xb0 + midiOffset, 
-							0x62,
-							0x17,
-							0xb0 + midiOffset, 
-							0x06, 
-							faderLevel
-						])
-					];
-					break;
-			}
-		}
-
-
-		for (let i = 0; i < cmd.buffers.length; i++) {
+		for (let i = 0; i < bufferCommands.length; i++) {
 			if (this.tcpSocket !== undefined) {
 				
-				result.Buffer = this.convertBuffer(cmd.buffers);
-
+				result.Buffer = this.convertBuffer(bufferCommands);
 				console.log(`------  ${JSON.stringify(result, null, 2)}`);
 
-				this.log('debug', `sending ${cmd.buffers[i].toString('hex')} via TCP @${this.config.host}`);
-				// this.tcpSocket.write(cmd.buffers[i]);
+				this.log('debug', `sending '${bufferCommands[i].toString('hex')}' ${i}/${bufferCommands.length} via TCP @${this.config.host}`);
+				// this.tcpSocket.write(bufferCommands[i]);
 			}
 		}
 	}
 
-	buildMuteBuffer(opt, midiOffset) {
+	buildMuteCommand(opt, midiOffset) {
+		// 9N, CH, 7F(3F), 9N, CH, 00
 		return [
 			Buffer.from([
 				0x90 + midiOffset, 
@@ -218,8 +160,10 @@ class instance extends instance_skel {
 		];
 	}
 
-	buildFaderBuffer(opt, midiOffset) {
+	buildFaderCommand(opt, midiOffset) {
 		let faderLevel = parseInt(opt.level);
+
+		// BN, 63, CH, BN, 62, 17, BN, 06, LV
 		return [
 			Buffer.from([
 				0xb0 + midiOffset, 
@@ -235,7 +179,7 @@ class instance extends instance_skel {
 		];
 	}
 
-	buildAssignBuffer(opt, midiOffset, isDca) {
+	buildAssignCommands(opt, midiOffset, isDca) {
 		let routingCmds = [];
 		let groups = isDca ? opt.dcaGroup : opt.muteGroup;
 		let offset = 0;
@@ -272,6 +216,22 @@ class instance extends instance_skel {
 		return routingCmds;
 	}
 
+	buildSceneCommand(opt, midiOffset) {
+		let scene = this.scenes[parseInt(opt.sceneNumber)];
+		
+		// BN, 00, Bank, CN, SS
+		return [
+			Buffer.from([
+				0xb0 + midiOffset, 
+				0x00, 
+				scene.block, 
+				0xc0 + midiOffset, 
+				scene.ss
+			])
+		];
+	}
+
+	// Remove This Method
 	convertBuffer(buffers) {
 		let result = [];
 		for (let x = 0; x < buffers.length; x++) {
@@ -380,31 +340,12 @@ class instance extends instance_skel {
 		this.scenes = [];
 
 		for (let i = 1; i <= avantisConfig.config.sceneCount; i++) {
-			let scenePart = i;
-
-			if (scenePart > 128) {
-				do {
-					scenePart -= 128;
-				
-				} while (scenePart > 128);
-			}
-
 			this.scenes.push({
 				sceneNumber: i, 
 				block: this.getSceneBank(i), 
-				ss: this.convertNumberToHex(scenePart - 1)
+				ss: this.getSceneSSNumber(i)
 			});
 		}
-	}
-
-	convertNumberToHex(value, offset = 0) {
-		let number = value - offset;
-		let hexNum = number.toString(16).toUpperCase();
-		if ((hexNum.length % 2) > 0) {
-			hexNum = "0" + hexNum;
-		}
-		console.log(`Converted '${value}' to '${hexNum}'`);
-		return hexNum;
 	}
 	
 	getSceneBank(sceneNumber) {
@@ -421,6 +362,16 @@ class instance extends instance_skel {
 		}
 
 		return 0x03;
+	}
+	
+	getSceneSSNumber(sceneNumber) {
+		if (sceneNumber > 128) {
+			do {
+				sceneNumber -= 128;
+			
+			} while (sceneNumber > 128);
+		}
+		return sceneNumber - 1;
 	}
 
 	/**
