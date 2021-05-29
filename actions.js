@@ -189,7 +189,7 @@ module.exports = {
 				{
 					type: 'dropdown',
 					label: 'Input Channel',
-					id: 'inputChannel',
+					id: 'channel',
 					default: '0',
 					choices: this.CHOICES_INPUT_CHANNEL,
 					minChoicesForSearch: 0,
@@ -202,7 +202,13 @@ module.exports = {
 					multiple: true,
 					choices: this.CHOICES_DCA,
 				},
-			],
+				{
+					type: 'checkbox',
+					label: 'Assign',
+					id: 'assign',
+					default: true
+				}
+			]
 		}
 
 		actions['mute_assign'] = {
@@ -211,7 +217,7 @@ module.exports = {
 				{
 					type: 'dropdown',
 					label: 'Input Channel',
-					id: 'inputChannel',
+					id: 'channel',
 					default: '0',
 					choices: this.CHOICES_INPUT_CHANNEL,
 					minChoicesForSearch: 0,
@@ -224,6 +230,12 @@ module.exports = {
 					multiple: true,
 					choices: this.CHOICES_MUTE,
 				},
+				{
+					type: 'checkbox',
+					label: 'Assign',
+					id: 'assign',
+					default: true
+				}
 			],
 		}
 

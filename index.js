@@ -67,30 +67,42 @@ class instance extends instance_skel {
 		switch (
 			action.action // Note that only available actions for the type (TCP or MIDI) will be processed
 		) {
-			case 'fader_input':
 			case 'mute_input':
-				midiOffset = 0;
+				cmd.buffers = this.buildMuteBuffer(opt, 0);
+				break;
+
+			case 'fader_input':
+				cmd.buffers = this.buildFaderBuffer(opt, 0);
 				break;
 
 			case 'mute_mono_group':
 			case 'mute_stereo_group':
+				cmd.buffers = this.buildMuteBuffer(opt, 1);
+				break;
+
 			case 'fader_mono_group':
 			case 'fader_stereo_group':
-				midiOffset = 1;
+				cmd.buffers = this.buildFaderBuffer(opt, 1);
 				break;
 
 			case 'mute_mono_aux':
 			case 'mute_stereo_aux':
+				cmd.buffers = this.buildMuteBuffer(opt, 2);
+				break;
+
 			case 'fader_mono_aux':
 			case 'fader_stereo_aux':
-				midiOffset = 2;
+				cmd.buffers = this.buildFaderBuffer(opt, 2);
 				break;
 
 			case 'mute_mono_matrix':
 			case 'mute_stereo_matrix':
+				cmd.buffers = this.buildMuteBuffer(opt, 3);
+				break;
+
 			case 'fader_mono_matrix':
 			case 'fader_stereo_matrix':
-				midiOffset = 3;
+				cmd.buffers = this.buildFaderBuffer(opt, 3);
 				break;
 
 			case 'mute_mono_fx_send':
@@ -98,22 +110,29 @@ class instance extends instance_skel {
 			case 'mute_fx_return':
 			case 'mute_dca':
 			case 'mute_master':
+				cmd.buffers = this.buildMuteBuffer(opt, 4);
+				break;
+
 			case 'fader_DCA':
 			case 'fader_mono_fx_send':
 			case 'fader_stereo_fx_send':
 			case 'fader_fx_return':
-				midiOffset = 4;
+				cmd.buffers = this.buildFaderBuffer(opt, 4);
 				break;
 
 			case 'dca_assign':
 				// BN, 63, CH, BN, 62, 40, BN, 06, DB(DA)
-				cmd.buffers = this.setRouting(opt.channel, opt.dcaGroup, false);
+				cmd.buffers = this.buildAssignBuffer(opt, 4, true);
 				break
 
 			case 'mute_assign':
 				// BN, 63, CH, BN, 62, 40, BN, 06, DB(DA)
-				cmd.buffers = this.setRouting(opt.channel, opt.muteGroup, true);
+				cmd.buffers = this.buildAssignBuffer(opt, 4, false);
 				break
+				
+			case 'fader_fx_return':
+				midiOffset = 4;
+				break;
 
 			case 'scene_recall':
 				// BN, 00, Bank, CN, SS
@@ -176,7 +195,7 @@ class instance extends instance_skel {
 		for (let i = 0; i < cmd.buffers.length; i++) {
 			if (this.tcpSocket !== undefined) {
 				
-				result.Buffer = this.convertBuffer(cmd.buffers[i].toString('hex'));
+				result.Buffer = this.convertBuffer(cmd.buffers);
 
 				console.log(`------  ${JSON.stringify(result, null, 2)}`);
 
@@ -186,44 +205,94 @@ class instance extends instance_skel {
 		}
 	}
 
-	convertBuffer(buffer) {
-		let val = 0;
-		let result = '';
-		for (let i = 0; i < buffer.length; i++) {
-			if (val == 2) {
-				result += ' ';
-				val = 0;
-			}
-			const element = buffer[i];
-			result += element;
-			val++;
-		}
-		return result;
+	buildMuteBuffer(opt, midiOffset) {
+		return [
+			Buffer.from([
+				0x90 + midiOffset, 
+				opt.channel, 
+				opt.mute ? 0x7f : 0x3f, 
+				0x90 + midiOffset, 
+				opt.channel, 
+				0x00
+			])
+		];
 	}
 
-	setRouting(ch, selArray, isMute) {
+	buildFaderBuffer(opt, midiOffset) {
+		let faderLevel = parseInt(opt.level);
+		return [
+			Buffer.from([
+				0xb0 + midiOffset, 
+				0x63, 
+				opt.channel, 
+				0xb0 + midiOffset, 
+				0x62,
+				0x17,
+				0xb0 + midiOffset, 
+				0x06, 
+				faderLevel
+			])
+		];
+	}
+
+	buildAssignBuffer(opt, midiOffset, isDca) {
 		let routingCmds = [];
-		let start = isMute ? this.dcaCount : 0;
-		let qty = isMute ? 8 : this.dcaCount;
-		let chOfs = this.config.model == 'dLive' ? 0 : 0x20;
-		for (let i = start; i < start + qty; i++) {
-			let grpCode = i + (selArray.includes(`${i - start}`) ? 0x40 : 0);
+		let groups = isDca ? opt.dcaGroup : opt.muteGroup;
+		let offset = 0;
+
+		if (isDca && !opt.assign) { // DCA and Assign OFF
+			offset = 0x40;
+		} else if (!isDca) { 		// Group Mute
+			if (opt.assign) { 		// Assign ON
+				offset = 0x10;
+			} else {				// Assign OFF
+				offset = 0x50;
+			}
+		}
+
+		for (let i = 0; i < groups.length; i++) {
+			let grpCode = groups[i];
+
+			// BN, 63, CH, BN, 62, 40, BN, 06, DB(DA)
 			routingCmds.push(
 				Buffer.from([
-					0xb0, 
+					0xb0 + midiOffset,
 					0x63, 
-					ch + chOfs, 
-					0xb0, 
+					opt.channel, 
+					0xb0 + midiOffset, 
 					0x62, 
 					0x40, 
-					0xb0, 
+					0xb0 + midiOffset, 
 					0x06, 
-					grpCode
+					grpCode + offset
 				])
 			);
 		}
 
 		return routingCmds;
+	}
+
+	convertBuffer(buffers) {
+		let result = [];
+		for (let x = 0; x < buffers.length; x++) {
+
+			let val = 0;
+			let bufferValue = '';
+			const buffer = buffers[x].toString('hex');
+
+			for (let i = 0; i < buffer.length; i++) {
+				if (val == 2) {
+					bufferValue += ' ';
+					val = 0;
+				}
+				const element = buffer[i];
+				bufferValue += element;
+				val++;
+			}
+			result.push(bufferValue);
+		}
+		
+		return result;
 	}
 
 	/**
