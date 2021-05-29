@@ -40,6 +40,16 @@ module.exports = {
 			this.CHOICES_FADER.push({ label: `${dbStr} dB`, id: parseInt(fader.level[i][1], 16) });
 		}
 
+		this.CHOICES_COLOR = [];
+		this.CHOICES_COLOR.push({ label: `Off`, id: 0 });
+		this.CHOICES_COLOR.push({ label: `Red`, id: 1 });
+		this.CHOICES_COLOR.push({ label: `Green`, id: 2 });
+		this.CHOICES_COLOR.push({ label: `Yellow`, id: 3 });
+		this.CHOICES_COLOR.push({ label: `Blue`, id: 4 });
+		this.CHOICES_COLOR.push({ label: `Purple`, id: 5 });
+		this.CHOICES_COLOR.push({ label: `Lt Blue`, id: 6 });
+		this.CHOICES_COLOR.push({ label: `White`, id: 7 });
+
 		// -----------------------
 		// OPTIONS
 		// -----------------------
@@ -86,6 +96,28 @@ module.exports = {
 			]
 		}
 
+		this.sendLevelOptions = (name, qty, ofs) => {
+			const choices = this.buildChoices(name, qty, ofs);
+			return [
+				{
+					type: 'dropdown',
+					label: `${name} Channel`,
+					id: 'channel',
+					default: '0',
+					choices: choices,
+					minChoicesForSearch: 0,
+				},
+				{
+					type: 'dropdown',
+					label: 'Level',
+					id: 'level',
+					default: 0,
+					choices: this.CHOICES_FADER,
+					minChoicesForSearch: 0,
+				},
+			]
+		}
+
 		// -----------------------
 		// ACTIONS
 		// -----------------------
@@ -93,6 +125,10 @@ module.exports = {
 		actions['mute_input'] = {
 			label: 'Mute Input',
 			options: this.muteOptions('Input Channel', avantis.inputCount, -1),
+		}
+		actions['mute_master'] = {
+			label: 'Mute Main',
+			options: this.muteOptions('Mute Main', avantis.mainsCount, 0x2F),
 		}
 		actions['mute_mono_group'] = {
 			label: 'Mute Mono Group',
@@ -130,9 +166,9 @@ module.exports = {
 			label: 'Mute FX Return',
 			options: this.muteOptions('FX Return', avantis.fxReturnCount, 0x1f),
 		}
-		actions['mute_master'] = {
-			label: 'Mute Group Master',
-			options: this.muteOptions('Mute Group Master', avantis.muteGroupCount, 0x45),
+		actions['mute_group'] = {
+			label: 'Mute Group',
+			options: this.muteOptions('Mute Group', avantis.muteGroupCount, 0x45),
 		}
 		actions['mute_dca'] = {
 			label: 'Mute DCA',
@@ -174,6 +210,10 @@ module.exports = {
 			label: 'Set Stereo FX Send Master Fader to Level',
 			options: this.faderOptions('Stereo FX Send', avantis.stereo.fxSendCount, 0x0f),
 		}
+		actions['fader_master'] = {
+			label: 'Set Main Master Fader to Level',
+			options: this.faderOptions('Main', avantis.mainsCount,  0x2F),
+		}
 		actions['fader_fx_return'] = {
 			label: 'Set FX Return Fader to Level',
 			options: this.faderOptions('FX Return', avantis.fxReturnCount, 0x1f),
@@ -211,7 +251,7 @@ module.exports = {
 			]
 		}
 
-		actions['mute_assign'] = {
+		actions['mute_group_assign'] = {
 			label: 'Assign Mute Groups for channel',
 			options: [
 				{
@@ -239,6 +279,68 @@ module.exports = {
 			],
 		}
 
+		actions['channel_main_assign'] = {
+			label: 'Assign Channel to Main Mix',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Input Channel',
+					id: 'channel',
+					default: '0',
+					choices: this.CHOICES_INPUT_CHANNEL,
+					minChoicesForSearch: 0,
+				},
+				{
+					type: 'checkbox',
+					label: 'Assign',
+					id: 'assign',
+					default: true
+				}
+			],
+		}
+
+		actions['channel_name'] = {
+			label: 'Set Channel Name',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Input Channel',
+					id: 'channel',
+					default: '0',
+					choices: this.CHOICES_INPUT_CHANNEL,
+					minChoicesForSearch: 0,
+				},
+				{
+					type: 'textinput',
+					label: 'Name of the Channel',
+					id: 'channelName',
+					tooltip: 'In this option you can enter whatever you want as long as it is the number one'
+				}
+			],
+		}
+
+		actions['channel_color'] = {
+			label: 'Set Channel Color',
+			options: [
+				{
+					type: 'dropdown',
+					label: 'Input Channel',
+					id: 'channel',
+					default: '0',
+					choices: this.CHOICES_INPUT_CHANNEL,
+					minChoicesForSearch: 0,
+				},
+				{
+					type: 'dropdown',
+					label: 'Channel Color',
+					id: 'color',
+					default: '0',
+					choices: this.CHOICES_COLOR,
+					minChoicesForSearch: 0,
+				}
+			],
+		}
+
 		actions['scene_recall'] = {
 			label: 'Scene recall',
 			options: [
@@ -251,6 +353,41 @@ module.exports = {
 					minChoicesForSearch: 0,
 				},
 			],
+		}
+
+		actions['send_mono_aux'] = {
+			label: 'Set Mono Aux Send Level',
+			options: this.sendLevelOptions('Mono Aux', avantis.mono.auxCount, -1),
+		}
+
+		actions['send_stereo_aux'] = {
+			label: 'Set Stereo Aux Send Level',
+			options: this.sendLevelOptions('Stereo Aux', avantis.stereo.auxCount, 0x3f),
+		}
+
+		actions['send_fx_return'] = {
+			label: 'Set FX Return Send Level',
+			options: this.sendLevelOptions('FX Return', avantis.fxReturnCount, 0x1f),
+		}
+
+		actions['send_mono_fx_return'] = {
+			label: 'Set Mono FX Return Send Level',
+			options: this.sendLevelOptions('Mono FX Return', avantis.mono.fxSendCount, -1),
+		}
+
+		actions['send_stereo_fx_return'] = {
+			label: 'Set Stereo FX Return Send Level',
+			options: this.sendLevelOptions('Stereo FX Return', avantis.stereo.fxSendCount, 0x0f),
+		}
+
+		actions['send_mono_matrix'] = {
+			label: 'Set Mono Matrix Send Level',
+			options: this.sendLevelOptions('Mono Matrix', avantis.mono.matrixCount, -1),
+		}
+
+		actions['send_stereo_matrix'] = {
+			label: 'Set Stereo Matrix Send Level',
+			options: this.sendLevelOptions('Stereo Matrix', avantis.stereo.matrixCount, 0x3f),
 		}
 
 		return actions;

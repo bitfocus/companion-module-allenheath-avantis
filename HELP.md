@@ -3,13 +3,15 @@
 Controls the Allen & Heath Avantis Mixer.
 
 ## Functions:
-*	Mutes
-*	Faders
-*	Mix and FX sends: Level, Pan, Assign
-*	Matrix sends: Level, Pan, Assign
-*	Groups: Assign (Level, Pan in mix mode)
-*	Mute Groups: Assign, Mute
-*	DCA Groups: Assign, Level, Mute
-*	Scene Recall
+* Faders: Input, Mix Master, FX Send, FX Return, DCA
+* Mutes: Input, Mix Master, FX Send, FX Return, DCA, Mute Groups
+* Send Levels: Aux, FX, Matrix Sends
+* DCA Assign
+* Input to Main Assign
+* Name & Color
+* Scene Recall
+* MIDI Transport
+* MIDI Strips
+* SoftKeys
 
 > Current version: 1.10
