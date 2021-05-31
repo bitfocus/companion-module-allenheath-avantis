@@ -194,12 +194,9 @@ class instance extends instance_skel {
 	 * @since 1.0.0
 	 */
 	action(action) {
-		let result = {};
 		var opt = action.options;
 		let bufferCommands = [];
 		let midiBase = this.config.midiBase;
-
-		result.options = opt;
 		
 		switch (
 			action.action // Note that only available actions for the type (TCP or MIDI) will be processed
@@ -283,30 +280,46 @@ class instance extends instance_skel {
 				bufferCommands = this.buildChannelColorCommand(opt, midiBase + 0);
 				break;
 			
-			case 'send_mono_aux':
-				bufferCommands = this.buildSendLevelCommand(opt, midiBase + 2);
+			case 'send_input_to_mono_aux':
+				bufferCommands = this.buildSendLevelCommand(opt, midiBase, 0, 2);
+				break;
+			
+			case 'send_input_to_stereo_aux':
+				bufferCommands = this.buildSendLevelCommand(opt, midiBase, 0, 2);
 				break;
 
-			// Send Levels:
-			//	- Aux
-			//	- FX
-			//	- Matrix Sends
+			case 'send_input_to_mono_matrix':
+				bufferCommands = this.buildSendLevelCommand(opt, midiBase, 0, 3);
+				break;
+
+			case 'send_input_to_stereo_matrix':
+				bufferCommands = this.buildSendLevelCommand(opt, midiBase, 0, 3);
+				break;
+		
+			case 'send_input_to_fx_return':
+				bufferCommands = this.buildSendLevelCommand(opt, midiBase, 0, 4);
+				break;
+	
+			case 'send_input_to_mono_fx_return':
+				bufferCommands = this.buildSendLevelCommand(opt, midiBase, 0, 4);
+				break;
+
+			case 'send_input_to_stereo_fx_return':
+				bufferCommands = this.buildSendLevelCommand(opt, midiBase, 0, 4);
+				break;
+
 			// MIDI Transport
 			// MIDI Strips
 			// SoftKeys
-
-			// Test:
-			// - Can i Mute these? Aux, Matrix, Group (stereo-mono)
 		}
 
 		for (let i = 0; i < bufferCommands.length; i++) {
-			if (this.tcpSocket !== undefined) {
+			if (this.tcpSocket) {
 				
-				result.Buffer = this.convertBuffer(bufferCommands);
-				console.log(`------  ${JSON.stringify(result, null, 2)}`);
+				this.dumpData(opt, midiBase, bufferCommands);
 
 				this.log('debug', `sending '${bufferCommands[i].toString('hex')}' ${i}/${bufferCommands.length} via TCP @${this.config.host}`);
-				// this.tcpSocket.write(bufferCommands[i]);
+				this.tcpSocket.write(bufferCommands[i]);
 			}
 		}
 	}
@@ -449,28 +462,32 @@ class instance extends instance_skel {
 		])];
 	}
 
-	buildSendLevelCommand(opt, midiOffset) {
+	buildSendLevelCommand(opt, baseMidi, srcMidiChnl, destMidiChnl) {
 		// SysEx Header, 0N, 0D, CH, SndN, SndCH, LV, F7
 		return [Buffer.from([
 			...SysExHeader, 
-			0x00 + midiOffset,
+			0x00 + baseMidi + srcMidiChnl,
 			0x0D,
-			parseInt(opt.channel),
-			// SndN
-			// SndCH
+			parseInt(opt.srcChannel),
+			baseMidi + destMidiChnl,
+			opt.destChannel,
 			parseInt(opt.level),
 			0xF7
 		])];
 	}
 
-	// Remove This Method
-	convertBuffer(buffers) {
-		let result = [];
-		for (let x = 0; x < buffers.length; x++) {
+	dumpData(opt, midiBase, bufferCommands) {
+		const result = {};
+		result.options = opt;
+		result.midiBase = midiBase;
+
+		result.Buffer = [];
+
+		for (let x = 0; x < bufferCommands.length; x++) {
 
 			let val = 0;
 			let bufferValue = '';
-			const buffer = buffers[x].toString('hex');
+			const buffer = bufferCommands[x].toString('hex');
 
 			for (let i = 0; i < buffer.length; i++) {
 				if (val == 2) {
@@ -481,10 +498,10 @@ class instance extends instance_skel {
 				bufferValue += element;
 				val++;
 			}
-			result.push(bufferValue);
+			result.Buffer.push(bufferValue);
 		}
-		
-		return result;
+
+		console.log(`Result:  ${JSON.stringify(result, null, 2)}`);
 	}
 
 	/**

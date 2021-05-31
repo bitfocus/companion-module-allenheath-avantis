@@ -96,15 +96,24 @@ module.exports = {
 			]
 		}
 
-		this.sendLevelOptions = (name, qty, ofs) => {
-			const choices = this.buildChoices(name, qty, ofs);
+		this.sendLevelOptions = (srcName, srcQty, srcOfs, destName, destQty, destOfs) => {
+			const srcChoices = this.buildChoices(srcName, srcQty, srcOfs);
+			const destChoices = this.buildChoices(destName, destQty, destOfs);
 			return [
 				{
 					type: 'dropdown',
-					label: `${name} Channel`,
-					id: 'channel',
-					default: '0',
-					choices: choices,
+					label: `${srcName} Channel`,
+					id: 'srcChannel',
+					default: 1 + srcOfs,
+					choices: srcChoices,
+					minChoicesForSearch: 0,
+				},
+				{
+					type: 'dropdown',
+					label: `${destName} Channel`,
+					id: 'destChannel',
+					default: 1 + destOfs,
+					choices: destChoices,
 					minChoicesForSearch: 0,
 				},
 				{
@@ -355,39 +364,39 @@ module.exports = {
 			],
 		}
 
-		actions['send_mono_aux'] = {
-			label: 'Set Mono Aux Send Level',
-			options: this.sendLevelOptions('Mono Aux', avantis.mono.auxCount, -1),
+		actions['send_input_to_mono_aux'] = {
+			label: 'Send Input to Mono Aux',
+			options: this.sendLevelOptions('Input', avantis.inputCount, -1, 'Mono Aux', avantis.mono.auxCount, -1),
 		}
 
-		actions['send_stereo_aux'] = {
-			label: 'Set Stereo Aux Send Level',
-			options: this.sendLevelOptions('Stereo Aux', avantis.stereo.auxCount, 0x3f),
+		actions['send_input_to_stereo_aux'] = {
+			label: 'Send Input to Stereo Aux',
+			options: this.sendLevelOptions('Input', avantis.inputCount, -1, 'Stereo Aux', avantis.stereo.auxCount, 0x3f),
 		}
 
-		actions['send_fx_return'] = {
-			label: 'Set FX Return Send Level',
-			options: this.sendLevelOptions('FX Return', avantis.fxReturnCount, 0x1f),
+		actions['send_input_to_fx_return'] = {
+			label: 'Send Input to FX Return',
+			options: this.sendLevelOptions('Input', avantis.inputCount, -1, 'FX Return', avantis.fxReturnCount, 0x1f),
 		}
 
-		actions['send_mono_fx_return'] = {
-			label: 'Set Mono FX Return Send Level',
-			options: this.sendLevelOptions('Mono FX Return', avantis.mono.fxSendCount, -1),
+		actions['send_input_to_mono_fx_return'] = {
+			label: 'Send Input to Mono FX Return',
+			options: this.sendLevelOptions('Input', avantis.inputCount, -1, 'Mono FX Return', avantis.mono.fxSendCount, -1),
 		}
 
-		actions['send_stereo_fx_return'] = {
-			label: 'Set Stereo FX Return Send Level',
-			options: this.sendLevelOptions('Stereo FX Return', avantis.stereo.fxSendCount, 0x0f),
+		actions['send_input_to_stereo_fx_return'] = {
+			label: 'Send Input to Stereo FX Return',
+			options: this.sendLevelOptions('Input', avantis.inputCount, -1, 'Stereo FX Return', avantis.stereo.fxSendCount, 0x0f),
 		}
 
-		actions['send_mono_matrix'] = {
-			label: 'Set Mono Matrix Send Level',
-			options: this.sendLevelOptions('Mono Matrix', avantis.mono.matrixCount, -1),
+		actions['send_input_to_mono_matrix'] = {
+			label: 'Send Input to Mono Matrix',
+			options: this.sendLevelOptions('Input', avantis.inputCount, -1, 'Mono Matrix', avantis.mono.matrixCount, -1),
 		}
 
-		actions['send_stereo_matrix'] = {
-			label: 'Set Stereo Matrix Send Level',
-			options: this.sendLevelOptions('Stereo Matrix', avantis.stereo.matrixCount, 0x3f),
+		actions['send_input_to_stereo_matrix'] = {
+			label: 'Send Input to Stereo Matrix',
+			options: this.sendLevelOptions('Input', avantis.inputCount, -1, 'Stereo Matrix', avantis.stereo.matrixCount, 0x3f),
 		}
 
 		return actions;
