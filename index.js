@@ -140,16 +140,24 @@ class instance extends instance_skel {
 			});
 			
 			this.tcpSocket.on('data', (data) => {
-				this.validateResponseData(JSON.parse(JSON.stringify(data))['data'])
+				this.validateResponseData(data);
 			})
 		}
 	}
 
 	validateResponseData(data) {
 
-		if (data) {
-			console.log(`Response DATA:  ${JSON.stringify(data, null, 2)}`);
+		if (!data) {
+			return;
 		}
+
+		const val = JSON.parse(JSON.stringify(data))['data'];
+
+		if (!val) {
+			return;
+		}
+		
+		console.log(`Response DATA:  ${JSON.stringify(val, null, 2)}`);
 	}
 
 	/**
@@ -456,7 +464,7 @@ class instance extends instance_skel {
 		// Add Name from opt.channelName
 		for (let i = 0; i < opt.channelName.length; i++) {
 			const char = opt.channelName[i];
-			const value = avantisConfig.nameChar[char];
+			const value = avantisConfig.name[char];
 			if (value) {
 				commandArray.push(parseInt(value, 16));
 			}
