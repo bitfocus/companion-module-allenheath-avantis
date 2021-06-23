@@ -15,308 +15,239 @@ module.exports = {
 		
 		var avantis = avantisConfig['config'];
 
-		this.buildChoices = (name, qty, ofs) => {
-			const choices = [];
+		this.buildChoices = (name, key, qty, ofs) => {
+			const choice = {
+				name: name,
+				offset: ofs,
+				values: []
+			};
 			for (let i = 1; i <= qty; i++) {
-				choices.push({ label: `${name} ${i}`, id: i + ofs })
+				choice.values.push({ label: `${key} ${i}`, id: i + ofs, offset: ofs })
 			}
-			return choices;
+			return choice;
 		}
 
 		// -----------------------
 		// CHOICES
 		// -----------------------
 
-		this.CHOICES_INPUT_CHANNEL = this.buildChoices(`CH`, avantis.inputCount, -1);
-		this.CHOICES_SCENES = this.buildChoices(`SCENE`, avantis.sceneCount, -1);
-		this.CHOICES_DCA = this.buildChoices(`DCA`, avantis.dcaCount, -1);
-		this.CHOICES_MUTE = this.buildChoices(`MUTE`, avantis.muteGroupCount, -1);
+		this.CHOICES_INPUT_CHANNEL = this.buildChoices(`Input Channel`, `CH`, avantis.inputCount, -1);
+		this.CHOICES_SCENES = this.buildChoices(`Scene`, `SCENE`, avantis.sceneCount, -1);
+		this.CHOICES_DCA = this.buildChoices(`DCA`, `DCA`, avantis.dcaCount, 0x35);
+		this.CHOICES_MUTE_GROUP = this.buildChoices(`Mute Group`, `MUTE`, avantis.muteGroupCount, 0x45);
+		this.CHOICES_MAIN_MIX = this.buildChoices(`Main Mix`, `MAIN`, avantis.mainsCount, 0x2F);
+		this.CHOICES_MONO_GROUP = this.buildChoices(`Mono Group`, `Mono Group`, avantis.mono.groupCount, -1);
+		this.CHOICES_STEREO_GROUP = this.buildChoices(`Stereo Group`, `Stereo Group`, avantis.stereo.groupCount, 0x3f);
+		this.CHOICES_MONO_AUX = this.buildChoices(`Mono Aux`, `Mono Aux`, avantis.mono.auxCount, -1);
+		this.CHOICES_STEREO_AUX = this.buildChoices(`Stereo Aux`, `Stereo Aux`, avantis.stereo.auxCount, 0x3f);
+		this.CHOICES_MONO_MATRIX = this.buildChoices(`Mono Matrix`, `Mono Matrix`, avantis.mono.matrixCount, -1);
+		this.CHOICES_STEREO_MATRIX = this.buildChoices(`Stereo Matrix`, `Stereo Matrix`, avantis.stereo.matrixCount, 0x3f);
+		this.CHOICES_MONO_FX_SEND = this.buildChoices(`Mono FX Send`, `Mono FX Send`, avantis.stereo.fxSendCount, -1);
+		this.CHOICES_STEREO_FX_SEND = this.buildChoices(`Stereo FX Send`, `Stereo FX Send`, avantis.stereo.fxSendCount, 0x0f);
+		this.CHOICES_FX_RETURN = this.buildChoices(`FX Return`, `FX Return`, avantis.fxReturnCount, 0x1f);
 
-		this.CHOICES_FADER = []
-		this.CHOICES_FADER.push({ label: `Step fader +1 dB`, id: 999 })
-		this.CHOICES_FADER.push({ label: `Step fader -1 dB`, id: 998 })
+		this.CHOICES_FADER = {
+			name: `Fader Level`,
+			offset: -1,
+			values: []
+		};
 		for (let i = 0; i < fader.level.length; i++) {
 			let dbStr = fader.level[i][0];
-			this.CHOICES_FADER.push({ label: `${dbStr} dB`, id: parseInt(fader.level[i][1], 16) });
+			// TODO: Check if the Offset fixes the fader changed value
+			this.CHOICES_FADER.values.push({ label: `${dbStr} dB`, id: parseInt(fader.level[i][1], 16) });
 		}
 
-		this.CHOICES_COLOR = [];
-		this.CHOICES_COLOR.push({ label: `Off`, id: 0 });
-		this.CHOICES_COLOR.push({ label: `Red`, id: 1 });
-		this.CHOICES_COLOR.push({ label: `Green`, id: 2 });
-		this.CHOICES_COLOR.push({ label: `Yellow`, id: 3 });
-		this.CHOICES_COLOR.push({ label: `Blue`, id: 4 });
-		this.CHOICES_COLOR.push({ label: `Purple`, id: 5 });
-		this.CHOICES_COLOR.push({ label: `Lt Blue`, id: 6 });
-		this.CHOICES_COLOR.push({ label: `White`, id: 7 });
+		this.CHOICES_COLOR = {
+			name: `Color`,
+			offset: -1,
+			values: [
+				{ label: `Off`, id: 0 },
+				{ label: `Red`, id: 1 },
+				{ label: `Green`, id: 2 },
+				{ label: `Yellow`, id: 3 },
+				{ label: `Blue`, id: 4 },
+				{ label: `Purple`, id: 5 },
+				{ label: `Lt Blue`, id: 6 },
+				{ label: `White`, id: 7 }
+			]
+		};
 
 		// -----------------------
 		// OPTIONS
 		// -----------------------
 
-		this.muteOptions = (name, qty, ofs) => {
-			const choices = this.buildChoices(name, qty, ofs);
-			return [
-				{
-					type: 'dropdown',
-					label: name,
-					id: 'channel',
-					default: 1 + ofs,
-					choices: choices,
-					minChoicesForSearch: 0
-				},
-				{
-					type: 'checkbox',
-					label: 'Mute',
-					id: 'mute',
-					default: true
-				},
-			]
+		this.muteActionBuilder = (label, choice) => {
+			return {
+				label: label,
+				options: [
+					{
+						type: 'dropdown',
+						label: choice.name,
+						id: 'channel',
+						default: 1 + choice.offset,
+						choices: choice.values,
+						minChoicesForSearch: 0
+					},
+					{
+						type: 'checkbox',
+						label: 'Mute',
+						id: 'mute',
+						default: true
+					},
+				]
+			};
 		}
 
-		this.faderOptions = (name, qty, ofs) => {
-			const choices = this.buildChoices(name, qty, ofs);
-			return [
-				{
-					type: 'dropdown',
-					label: name,
-					id: 'channel',
-					default: 1 + ofs,
-					choices: choices,
-					minChoicesForSearch: 0,
-				},
-				{
-					type: 'dropdown',
-					label: 'Level',
-					id: 'level',
-					default: 0,
-					choices: this.CHOICES_FADER,
-					minChoicesForSearch: 0,
-				},
-			]
+		this.faderActionBuilder = (label, choice) => {
+			return {
+				label: label,
+				options: [
+					{
+						type: 'dropdown',
+						label: choice.name,
+						id: 'channel',
+						default: 1 + choice.offset,
+						choices: choice.values,
+						minChoicesForSearch: 0,
+					},
+					{
+						type: 'dropdown',
+						label: this.CHOICES_FADER.name,
+						id: 'level',
+						default: 1 + this.CHOICES_FADER.offset,
+						choices: this.CHOICES_FADER.values,
+						minChoicesForSearch: 0,
+					}
+				]
+			};
 		}
 
-		this.sendLevelOptions = (srcName, srcQty, srcOfs, destName, destQty, destOfs) => {
-			const srcChoices = this.buildChoices(srcName, srcQty, srcOfs);
-			const destChoices = this.buildChoices(destName, destQty, destOfs);
-			return [
-				{
-					type: 'dropdown',
-					label: `${srcName} Channel`,
-					id: 'srcChannel',
-					default: 1 + srcOfs,
-					choices: srcChoices,
-					minChoicesForSearch: 0,
-				},
-				{
-					type: 'dropdown',
-					label: `${destName} Channel`,
-					id: 'destChannel',
-					default: 1 + destOfs,
-					choices: destChoices,
-					minChoicesForSearch: 0,
-				},
-				{
-					type: 'dropdown',
-					label: 'Level',
-					id: 'level',
-					default: 0,
-					choices: this.CHOICES_FADER,
-					minChoicesForSearch: 0,
-				},
-			]
+		this.sendLevelActionBuilder = (label, srcChoice, destChoice) => {
+			return {
+				label: label,
+				options: [
+					{
+						type: 'dropdown',
+						label: srcChoice.name,
+						id: 'srcChannel',
+						default: 1 + srcChoice.offset,
+						choices: srcChoice.values,
+						minChoicesForSearch: 0,
+					},
+					{
+						type: 'dropdown',
+						label: destChoice.name,
+						id: 'destChannel',
+						default: 1 + destChoice.offset,
+						choices: destChoice.values,
+						minChoicesForSearch: 0,
+					},
+					{
+						type: 'dropdown',
+						label: this.CHOICES_FADER.name,
+						id: 'level',
+						default: 1 + this.CHOICES_FADER.offset,
+						choices: this.CHOICES_FADER.values,
+						minChoicesForSearch: 0,
+					}
+				]
+			};
+		}
+
+		this.assignActionBuilder = (label, srcChoice, destId, destChoice) => {
+			return {
+				label: label,
+				options: [
+					{
+						type: 'dropdown',
+						label: srcChoice.name,
+						id: 'channel',
+						default: 1 + srcChoice.offset,
+						choices: srcChoice.values,
+						minChoicesForSearch: 0,
+					},
+					{
+						type: 'dropdown',
+						label: destChoice.name,
+						id: destId,
+						default: [],
+						multiple: true,
+						choices: destChoice.values,
+					},
+					{
+						type: 'checkbox',
+						label: 'Assign',
+						id: 'assign',
+						default: true
+					}
+				]
+			};
 		}
 
 		// -----------------------
 		// ACTIONS
 		// -----------------------
 
-		actions['mute_input'] = {
-			label: 'Mute Input',
-			options: this.muteOptions('Input Channel', avantis.inputCount, -1),
-		}
-		actions['mute_master'] = {
-			label: 'Mute Main',
-			options: this.muteOptions('Mute Main', avantis.mainsCount, 0x2F),
-		}
-		actions['mute_mono_group'] = {
-			label: 'Mute Mono Group',
-			options: this.muteOptions('Mono Group', avantis.mono.groupCount, -1),
-		}
-		actions['mute_stereo_group'] = {
-			label: 'Mute Stereo Group',
-			options: this.muteOptions('Stereo Group', avantis.stereo.groupCount, 0x3f),
-		}
-		actions['mute_mono_aux'] = {
-			label: 'Mute Mono Aux',
-			options: this.muteOptions('Mono Aux', avantis.mono.auxCount, -1),
-		}
-		actions['mute_stereo_aux'] = {
-			label: 'Mute Stereo Aux',
-			options: this.muteOptions('Stereo Aux', avantis.stereo.auxCount, 0x3f),
-		}
-		actions['mute_mono_matrix'] = {
-			label: 'Mute Mono Matrix',
-			options: this.muteOptions('Mono Matrix', avantis.mono.matrixCount, -1),
-		}
-		actions['mute_stereo_matrix'] = {
-			label: 'Mute Stereo Matrix',
-			options: this.muteOptions('Stereo Matrix', avantis.stereo.matrixCount, 0x3f),
-		}
-		actions['mute_mono_fx_send'] = {
-			label: 'Mute Mono FX Send',
-			options: this.muteOptions('Mono FX Send', avantis.mono.fxSendCount, -1),
-		}
-		actions['mute_stereo_fx_send'] = {
-			label: 'Mute Stereo FX Send',
-			options: this.muteOptions('Stereo FX Send', avantis.stereo.fxSendCount, 0x0f),
-		}
-		actions['mute_fx_return'] = {
-			label: 'Mute FX Return',
-			options: this.muteOptions('FX Return', avantis.fxReturnCount, 0x1f),
-		}
-		actions['mute_group'] = {
-			label: 'Mute Group',
-			options: this.muteOptions('Mute Group', avantis.muteGroupCount, 0x45),
-		}
-		actions['mute_dca'] = {
-			label: 'Mute DCA',
-			options: this.muteOptions('DCA', avantis.dcaCount, 0x35),
-		}
-		actions['fader_input'] = {
-			label: 'Set Input Fader to Level',
-			options: this.faderOptions('Channel', avantis.inputCount, -1),
-		}
-		actions['fader_mono_group'] = {
-			label: 'Set Mono Group Master Fader to Level',
-			options: this.faderOptions('Mono Group', avantis.mono.groupCount, -1),
-		}
-		actions['fader_stereo_group'] = {
-			label: 'Set Stereo Group Master Fader to Level',
-			options: this.faderOptions('Stereo Group', avantis.stereo.groupCount, 0x3f),
-		}
-		actions['fader_mono_aux'] = {
-			label: 'Set Mono Aux Master Fader to Level',
-			options: this.faderOptions('Mono Aux', avantis.mono.auxCount, -1),
-		}
-		actions['fader_stereo_aux'] = {
-			label: 'Set Stereo Aux Master Fader to Level',
-			options: this.faderOptions('Stereo Aux', avantis.stereo.auxCount, 0x3f),
-		}
-		actions['fader_mono_matrix'] = {
-			label: 'Set Mono Matrix Master Fader to Level',
-			options: this.faderOptions('Mono Matrix', avantis.mono.matrixCount, -1),
-		}
-		actions['fader_stereo_matrix'] = {
-			label: 'Set Stereo Matrix Master Fader to Level',
-			options: this.faderOptions('Stereo Matrix', avantis.stereo.matrixCount, 0x3f),
-		}
-		actions['fader_mono_fx_send'] = {
-			label: 'Set Mono FX Send Master Fader to Level',
-			options: this.faderOptions('Mono FX Send', avantis.mono.fxSendCount, -1),
-		}
-		actions['fader_stereo_fx_send'] = {
-			label: 'Set Stereo FX Send Master Fader to Level',
-			options: this.faderOptions('Stereo FX Send', avantis.stereo.fxSendCount, 0x0f),
-		}
-		actions['fader_master'] = {
-			label: 'Set Main Master Fader to Level',
-			options: this.faderOptions('Main', avantis.mainsCount,  0x2F),
-		}
-		actions['fader_fx_return'] = {
-			label: 'Set FX Return Fader to Level',
-			options: this.faderOptions('FX Return', avantis.fxReturnCount, 0x1f),
-		}
-		actions['fader_DCA'] = {
-			label: 'Set DCA Fader to Level',
-			options: this.faderOptions('DCA', avantis.dcaCount, 0x35),
-		}
+		actions['mute_input'] = this.muteActionBuilder('Mute Input', this.CHOICES_INPUT_CHANNEL);
+		actions['mute_master'] = this.muteActionBuilder('Mute Main', this.CHOICES_MAIN_MIX);
+
+		actions['mute_mono_group'] = this.muteActionBuilder('Mute Mono Group', this.CHOICES_MONO_GROUP);
+		actions['mute_stereo_group'] = this.muteActionBuilder('Mute Stereo Group', this.CHOICES_STEREO_GROUP);
+
+		actions['mute_mono_aux'] = this.muteActionBuilder('Mute Mono Aux', this.CHOICES_MONO_AUX);
+		actions['mute_stereo_aux'] = this.muteActionBuilder('Mute Stereo Aux', this.CHOICES_STEREO_AUX);
 		
-		actions['dca_assign'] = {
-			label: 'Assign DCA Groups for channel',
-			options: [
-				{
-					type: 'dropdown',
-					label: 'Input Channel',
-					id: 'channel',
-					default: '0',
-					choices: this.CHOICES_INPUT_CHANNEL,
-					minChoicesForSearch: 0,
-				},
-				{
-					type: 'dropdown',
-					label: 'DCA',
-					id: 'dcaGroup',
-					default: [],
-					multiple: true,
-					choices: this.CHOICES_DCA,
-				},
-				{
-					type: 'checkbox',
-					label: 'Assign',
-					id: 'assign',
-					default: true
-				}
-			]
-		}
+		actions['mute_mono_matrix'] = this.muteActionBuilder('Mute Mono Matrix', this.CHOICES_MONO_MATRIX);
+		actions['mute_stereo_matrix'] = this.muteActionBuilder('Mute Stereo Matrix', this.CHOICES_STEREO_MATRIX);
+		
+		actions['mute_mono_fx_send'] = this.muteActionBuilder('Mute Mono FX Send', this.CHOICES_MONO_FX_SEND);
+		actions['mute_stereo_fx_send'] = this.muteActionBuilder('Mute Stereo FX Send', this.CHOICES_STEREO_FX_SEND);
+		actions['mute_fx_return'] = this.muteActionBuilder('Mute FX Return', this.CHOICES_FX_RETURN);
 
-		actions['mute_group_assign'] = {
-			label: 'Assign Mute Groups for channel',
-			options: [
-				{
-					type: 'dropdown',
-					label: 'Input Channel',
-					id: 'channel',
-					default: '0',
-					choices: this.CHOICES_INPUT_CHANNEL,
-					minChoicesForSearch: 0,
-				},
-				{
-					type: 'dropdown',
-					label: 'MUTE',
-					id: 'muteGroup',
-					default: [],
-					multiple: true,
-					choices: this.CHOICES_MUTE,
-				},
-				{
-					type: 'checkbox',
-					label: 'Assign',
-					id: 'assign',
-					default: true
-				}
-			],
-		}
+		actions['mute_group'] = this.muteActionBuilder('Mute Group', this.CHOICES_MUTE_GROUP);
+		actions['mute_dca'] = this.muteActionBuilder('Mute DCA', this.CHOICES_DCA);
 
-		actions['channel_main_assign'] = {
-			label: 'Assign Channel to Main Mix',
-			options: [
-				{
-					type: 'dropdown',
-					label: 'Input Channel',
-					id: 'channel',
-					default: '0',
-					choices: this.CHOICES_INPUT_CHANNEL,
-					minChoicesForSearch: 0,
-				},
-				{
-					type: 'checkbox',
-					label: 'Assign',
-					id: 'assign',
-					default: true
-				}
-			],
-		}
+		actions['fader_input'] = this.faderActionBuilder('Set Input Fader to Level', this.CHOICES_INPUT_CHANNEL);
+		actions['fader_mono_group'] = this.faderActionBuilder('Set Mono Group Master Fader to Level', this.CHOICES_MONO_GROUP);
+		actions['fader_stereo_group'] = this.faderActionBuilder('Set Stereo Group Master Fader to Level', this.CHOICES_STEREO_GROUP);
+		actions['fader_mono_aux'] = this.faderActionBuilder('Set Mono Aux Master Fader to Level', this.CHOICES_MONO_AUX);
+		actions['fader_stereo_aux'] = this.faderActionBuilder('Set Stereo Aux Master Fader to Level', this.CHOICES_STEREO_AUX);
+		actions['fader_mono_matrix'] = this.faderActionBuilder('Set Mono Matrix Master Fader to Level', this.CHOICES_MONO_MATRIX);
+		actions['fader_stereo_matrix'] = this.faderActionBuilder('Set Stereo Matrix Master Fader to Level', this.CHOICES_STEREO_MATRIX);
+		actions['fader_mono_fx_send'] = this.faderActionBuilder('Set Mono FX Send Master Fader to Level', this.CHOICES_MONO_FX_SEND);
+		actions['fader_stereo_fx_send'] = this.faderActionBuilder('Set Stereo FX Send Master Fader to Level', this.CHOICES_STEREO_FX_SEND);
+		actions['fader_master'] = this.faderActionBuilder('Set Main Master Fader to Level', this.CHOICES_MAIN_MIX);
+		actions['fader_fx_return'] = this.faderActionBuilder('Set FX Return Fader to Level', this.CHOICES_FX_RETURN);
+		actions['fader_DCA'] = this.faderActionBuilder('Set DCA Fader to Level', this.CHOICES_DCA);
+		
+		actions['dca_assign'] = this.assignActionBuilder(
+			'Assign DCA Groups for channel',
+			this.CHOICES_INPUT_CHANNEL,
+			'dcaGroup',
+			this.CHOICES_DCA
+		);
+		actions['mute_group_assign'] = this.assignActionBuilder(
+			'Assign Mute Groups for channel',
+			this.CHOICES_INPUT_CHANNEL,
+			'muteGroup',
+			this.CHOICES_MUTE_GROUP
+		);
+		actions['channel_main_assign'] = this.assignActionBuilder(
+			'Assign Channel to Main Mix',
+			this.CHOICES_INPUT_CHANNEL,
+			'mainMix',
+			this.CHOICES_MAIN_MIX
+		);
 
 		actions['channel_name'] = {
 			label: 'Set Channel Name',
 			options: [
 				{
 					type: 'dropdown',
-					label: 'Input Channel',
+					label: this.CHOICES_INPUT_CHANNEL.name,
 					id: 'channel',
-					default: '0',
-					choices: this.CHOICES_INPUT_CHANNEL,
+					default: 1 + this.CHOICES_INPUT_CHANNEL.offset,
+					choices: this.CHOICES_INPUT_CHANNEL.values,
 					minChoicesForSearch: 0,
 				},
 				{
@@ -333,18 +264,18 @@ module.exports = {
 			options: [
 				{
 					type: 'dropdown',
-					label: 'Input Channel',
+					label: this.CHOICES_INPUT_CHANNEL.name,
 					id: 'channel',
-					default: '0',
-					choices: this.CHOICES_INPUT_CHANNEL,
+					default: 1 + this.CHOICES_INPUT_CHANNEL.offset,
+					choices: this.CHOICES_INPUT_CHANNEL.values,
 					minChoicesForSearch: 0,
 				},
 				{
 					type: 'dropdown',
-					label: 'Channel Color',
+					label: this.CHOICES_COLOR.name,
 					id: 'color',
-					default: '0',
-					choices: this.CHOICES_COLOR,
+					default: 1 + this.CHOICES_COLOR.offset,
+					choices: this.CHOICES_COLOR.values,
 					minChoicesForSearch: 0,
 				}
 			],
@@ -355,48 +286,85 @@ module.exports = {
 			options: [
 				{
 					type: 'dropdown',
-					label: 'Scene Number',
+					label: this.CHOICES_SCENES.name,
 					id: 'sceneNumber',
-					default: '0',
-					choices: this.CHOICES_SCENES,
+					default: 1 + this.CHOICES_SCENES.offset,
+					choices: this.CHOICES_SCENES.values,
 					minChoicesForSearch: 0,
 				},
 			],
 		}
 
-		actions['send_input_to_mono_aux'] = {
-			label: 'Send Input to Mono Aux',
-			options: this.sendLevelOptions('Input', avantis.inputCount, -1, 'Mono Aux', avantis.mono.auxCount, -1),
-		}
+		actions['send_input_to_mono_aux'] = this.sendLevelActionBuilder(
+			'Send Input to Mono Aux',
+			this.CHOICES_INPUT_CHANNEL,
+			this.CHOICES_MONO_AUX
+		);
 
-		actions['send_input_to_stereo_aux'] = {
-			label: 'Send Input to Stereo Aux',
-			options: this.sendLevelOptions('Input', avantis.inputCount, -1, 'Stereo Aux', avantis.stereo.auxCount, 0x3f),
-		}
+		actions['send_input_to_stereo_aux'] = this.sendLevelActionBuilder(
+			'Send Input to Stereo Aux',
+			this.CHOICES_INPUT_CHANNEL,
+			this.CHOICES_STEREO_AUX
+		);
 
-		actions['send_input_to_fx_return'] = {
-			label: 'Send Input to FX Return',
-			options: this.sendLevelOptions('Input', avantis.inputCount, -1, 'FX Return', avantis.fxReturnCount, 0x1f),
-		}
+		actions['send_input_to_fx_return'] = this.sendLevelActionBuilder(
+			'Send Input to FX Return',
+			this.CHOICES_INPUT_CHANNEL,
+			this.CHOICES_FX_RETURN
+		);
 
-		actions['send_input_to_mono_fx_return'] = {
-			label: 'Send Input to Mono FX Return',
-			options: this.sendLevelOptions('Input', avantis.inputCount, -1, 'Mono FX Return', avantis.mono.fxSendCount, -1),
-		}
+		actions['send_input_to_mono_fx_return'] = this.sendLevelActionBuilder(
+			'Send Input to Mono FX Return',
+			this.CHOICES_INPUT_CHANNEL,
+			this.CHOICES_MONO_FX_SEND
+		);
 
-		actions['send_input_to_stereo_fx_return'] = {
-			label: 'Send Input to Stereo FX Return',
-			options: this.sendLevelOptions('Input', avantis.inputCount, -1, 'Stereo FX Return', avantis.stereo.fxSendCount, 0x0f),
-		}
+		actions['send_input_to_stereo_fx_return'] = this.sendLevelActionBuilder(
+			'Send Input to Stereo FX Return',
+			this.CHOICES_INPUT_CHANNEL,
+			this.CHOICES_STEREO_FX_SEND
+		);
 
-		actions['send_input_to_mono_matrix'] = {
-			label: 'Send Input to Mono Matrix',
-			options: this.sendLevelOptions('Input', avantis.inputCount, -1, 'Mono Matrix', avantis.mono.matrixCount, -1),
-		}
+		actions['send_input_to_mono_matrix'] = this.sendLevelActionBuilder(
+			'Send Input to Mono Matrix',
+			this.CHOICES_INPUT_CHANNEL,
+			this.CHOICES_MONO_MATRIX
+		);
 
-		actions['send_input_to_stereo_matrix'] = {
-			label: 'Send Input to Stereo Matrix',
-			options: this.sendLevelOptions('Input', avantis.inputCount, -1, 'Stereo Matrix', avantis.stereo.matrixCount, 0x3f),
+		actions['send_input_to_stereo_matrix'] = this.sendLevelActionBuilder(
+			'Send Input to Stereo Matrix',
+			this.CHOICES_INPUT_CHANNEL,
+			this.CHOICES_STEREO_MATRIX
+		);
+
+		actions['send_input_to'] = {
+			label: 'Send Input to',
+			options:  [
+				{
+					type: 'dropdown',
+					label: this.CHOICES_INPUT_CHANNEL.name,
+					id: 'srcChannel',
+					default: 1 + this.CHOICES_INPUT_CHANNEL.offset,
+					choices: this.CHOICES_INPUT_CHANNEL.values,
+					minChoicesForSearch: 0
+				},
+				{
+					type: 'dropdown',
+					label: this.CHOICES_MAIN_MIX.name,
+					id: 'destChannel',
+					default: 1 + this.CHOICES_MAIN_MIX.offset,
+					choices: this.CHOICES_MAIN_MIX.values,
+					minChoicesForSearch: 0,
+				},
+				{
+					type: 'dropdown',
+					label: this.CHOICES_FADER.name,
+					id: 'level',
+					default: 1 + this.CHOICES_FADER.offset,
+					choices: this.CHOICES_FADER.values,
+					minChoicesForSearch: 0,
+				},
+			],
 		}
 
 		return actions;

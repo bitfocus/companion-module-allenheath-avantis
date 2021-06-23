@@ -102,9 +102,9 @@ class instance extends instance_skel {
 				label: 'MIDI Base Channel',
 				id: 'midiBase',
 				tooltip: 'The base channel selected in Utility / Control / MIDI and cannot exceed 12',
-				min: 0,
+				min: 1,
 				max: 12,
-				default: 0,
+				default: 1,
 				step: 1,
 				required: true,
 				range: false
@@ -138,6 +138,17 @@ class instance extends instance_skel {
 			this.tcpSocket.on('connect', () => {
 				this.log('debug', `TCP Connected to ${this.config.host}`);
 			});
+			
+			this.tcpSocket.on('data', (data) => {
+				this.validateResponseData(JSON.parse(JSON.stringify(data))['data'])
+			})
+		}
+	}
+
+	validateResponseData(data) {
+
+		if (data) {
+			console.log(`Response DATA:  ${JSON.stringify(data, null, 2)}`);
 		}
 	}
 
@@ -196,7 +207,8 @@ class instance extends instance_skel {
 	action(action) {
 		var opt = action.options;
 		let bufferCommands = [];
-		let midiBase = this.config.midiBase;
+		// Have to Minus 1 for converting it to Hex on Send
+		let midiBase = this.config.midiBase - 1;
 		
 		switch (
 			action.action // Note that only available actions for the type (TCP or MIDI) will be processed
@@ -265,19 +277,19 @@ class instance extends instance_skel {
 				break;
 
 			case 'scene_recall':
-				bufferCommands = this.buildSceneCommand(opt, midiBase + 0);
+				bufferCommands = this.buildSceneCommand(opt, midiBase);
 				break;
 
 			case 'channel_main_assign':
-				bufferCommands = this.buildChannelAssignCommand(opt, midiBase + 0);
+				bufferCommands = this.buildChannelAssignCommand(opt, midiBase);
 				break;
 
 			case 'channel_name':
-				bufferCommands = this.buildChannelNameCommand(opt, midiBase + 0);
+				bufferCommands = this.buildChannelNameCommand(opt, midiBase);
 				break;
 
 			case 'channel_color':
-				bufferCommands = this.buildChannelColorCommand(opt, midiBase + 0);
+				bufferCommands = this.buildChannelColorCommand(opt, midiBase);
 				break;
 			
 			case 'send_input_to_mono_aux':
@@ -305,6 +317,10 @@ class instance extends instance_skel {
 				break;
 
 			case 'send_input_to_stereo_fx_return':
+				bufferCommands = this.buildSendLevelCommand(opt, midiBase, 0, 4);
+				break;
+
+			case 'send_input_to':
 				bufferCommands = this.buildSendLevelCommand(opt, midiBase, 0, 4);
 				break;
 
