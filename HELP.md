@@ -1,6 +1,6 @@
 # Allen & Heath Avantis module
 
-Controls the Allen & Heath Avantis Mixer.
+Controls the Allen & Heath Avantis mixer.
 
 ## Functions:
 * Faders: Input, Mix Master, FX Send, FX Return, DCA
@@ -13,5 +13,9 @@ Controls the Allen & Heath Avantis Mixer.
 * MIDI Transport
 * MIDI Strips
 * SoftKeys
+
+## Setup
+* Enter the Target IP address of your Avantis console.
+* Enter the MIDI base channel, which can be found on your Avantis under Utility > MIDI.
 
 > Current version: 1.10
