@@ -1,6 +1,6 @@
 {
   "name": "allenheath-avantis",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "api_version": "1.0.0",
   "keywords": [
     "Software",
@@ -10,13 +10,35 @@
   "product": "Avantis",
   "shortname": "Avantis",
   "description": "Module to control Allen & Heath Avantis Mixer",
-  "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "postinstall": "husky",
+    "format": "prettier -w .",
+    "package": "run build && companion-module-build",
+    "build": "rimraf dist && run build:main",
+    "build:main": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "lint:raw": "eslint",
+    "lint": "run lint:raw ."
   },
-  "author": "Shaun Brown <Shaunhbrown@outlook.com>",
-  "contributors": [],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bitfocus/companion-module-allenheath-avantis.git"
+  },
   "dependencies": {
-  }
+    "@companion-module/base": "~1.11.2"
+  },
+  "devDependencies": {
+    "@companion-module/tools": "^2.1.1",
+    "@types/node": "^22.13.5",
+    "eslint": "^9.17.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.11",
+    "prettier": "^3.4.2",
+    "rimraf": "^6.0.1",
+    "typescript": "~5.5.4",
+    "typescript-eslint": "^8.18.1"
+  },
+  "prettier": "@companion-module/tools/.prettierrc.json",
+  "packageManager": "yarn@4.5.3"
 }
