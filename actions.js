@@ -155,6 +155,38 @@ module.exports = {
 			};
 		}
 
+		this.sendLevelActionBuilderNumber = (label, srcChoice, destChoice) => {
+			return {
+				label: label,
+				options: [
+					{
+						type: 'dropdown',
+						label: srcChoice.name,
+						id: 'srcChannel',
+						default: 1 + srcChoice.offset,
+						choices: srcChoice.values,
+						minChoicesForSearch: 0,
+					},
+					{
+						type: 'dropdown',
+						label: destChoice.name,
+						id: 'destChannel',
+						default: 1 + destChoice.offset,
+						choices: destChoice.values,
+						minChoicesForSearch: 0,
+					},
+					{	
+						type: 'number',
+						label: 'Level (0-20)',
+						id: 'level-int',
+						min: 0,
+						max: 20,
+						step: 1,
+					}
+				]
+			}
+		}
+
 		this.assignActionBuilder = (label, srcChoice, destId, destChoice) => {
 			return {
 				label: label,
@@ -298,6 +330,12 @@ module.exports = {
 
 		actions['send_input_to_mono_aux'] = this.sendLevelActionBuilder(
 			'Send Input to Mono Aux',
+			this.CHOICES_INPUT_CHANNEL,
+			this.CHOICES_MONO_AUX
+		);
+
+		actions['send_input_to_mono_aux_number'] = this.sendLevelActionBuilder(
+			'Send Input to Mono Aux (Number)',
 			this.CHOICES_INPUT_CHANNEL,
 			this.CHOICES_MONO_AUX
 		);

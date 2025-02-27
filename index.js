@@ -8,6 +8,7 @@
 let tcp = require('../../tcp')
 let instance_skel = require('../../instance_skel')
 let actions = require('./actions')
+const fader = require('./fader.json')
 
 const avantisConfig = require('./avantisconfig.json')
 const PORT = 51325
@@ -303,6 +304,10 @@ class instance extends instance_skel {
 			case 'send_input_to_mono_aux':
 				bufferCommands = this.buildSendLevelCommand(opt, midiBase, 0, 2);
 				break;
+
+			case 'send_input_to_mono_aux_number':
+				bufferCommands = this.buildSendLevelNumberCommand(opt, midiBase, 0, 2);
+				break;
 			
 			case 'send_input_to_stereo_aux':
 				bufferCommands = this.buildSendLevelCommand(opt, midiBase, 0, 2);
@@ -496,6 +501,48 @@ class instance extends instance_skel {
 			baseMidi + destMidiChnl,
 			opt.destChannel,
 			parseInt(opt.level),
+			0xF7
+		])];
+	}
+
+	buildSendLevelNumberCommand(opt, baseMidi, srcMidiChnl, destMidiChnl) {
+
+		const levelMap = [
+			["0","0x6B"],
+			["-1","0x69"],
+			["-2","0x67"],
+			["-3","0x65"],
+			["-4","0x63"],
+			["-5","0x61"],
+			["-6","0x5F"],
+			["-7","0x5D"],
+			["-8","0x5B"],
+			["-9","0x59"],
+			["-10","0x57"],
+			["-11","0x55"],
+			["-13","0x51"],
+			["-17","0x49"],
+			["-20","0x43"],
+			["-24","0x3B"],
+			["-25","0x39"],
+			["-30","0x2F"],
+			["-40","0x1B"],
+			["-inf","0x00"]
+		].reverse();
+
+		const levelAsHexString = levelMap[opt.level][1];
+
+		this.log('debug', `levelAsHexString: ${opt.level} ${levelAsHexString}`);
+
+		// SysEx Header, 0N, 0D, CH, SndN, SndCH, LV, F7
+		return [Buffer.from([
+			...SysExHeader, 
+			0x00 + baseMidi + srcMidiChnl,	
+			0x0D,
+			parseInt(opt.srcChannel),
+			baseMidi + destMidiChnl,
+			opt.destChannel,
+			parseInt(levelAsHexString),
 			0xF7
 		])];
 	}
