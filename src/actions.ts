@@ -325,7 +325,7 @@ export default function (self: any) {
 		)
 
 		actions['channel_name'] = {
-			label: 'Set Channel Name',
+			name: 'Set Channel Name',
 			options: [
 				{
 					type: 'dropdown',
@@ -342,10 +342,16 @@ export default function (self: any) {
 					tooltip: 'In this option you can enter whatever you want as long as it is the number one',
 				},
 			],
+			callback: (action, context) => {
+				self.action({
+					action: action.actionId,
+					options: action.options,
+				})
+			},
 		}
 
 		actions['channel_color'] = {
-			label: 'Set Channel Color',
+			name: 'Set Channel Color',
 			options: [
 				{
 					type: 'dropdown',
@@ -364,10 +370,16 @@ export default function (self: any) {
 					minChoicesForSearch: 0,
 				},
 			],
+			callback: (action, context) => {
+				self.action({
+					action: action.actionId,
+					options: action.options,
+				})
+			},
 		}
 
 		actions['scene_recall'] = {
-			label: 'Scene recall',
+			name: 'Scene recall',
 			options: [
 				{
 					type: 'dropdown',
@@ -378,6 +390,12 @@ export default function (self: any) {
 					minChoicesForSearch: 0,
 				},
 			],
+			callback: (action, context) => {
+				self.action({
+					action: action.actionId,
+					options: action.options,
+				})
+			},
 		}
 
 		actions['send_input_to_mono_aux'] = self.sendLevelActionBuilder(
@@ -429,7 +447,7 @@ export default function (self: any) {
 		)
 
 		actions['send_input_to'] = {
-			label: 'Send Input to',
+			name: 'Send Input to',
 			options: [
 				{
 					type: 'dropdown',
@@ -456,6 +474,12 @@ export default function (self: any) {
 					minChoicesForSearch: 0,
 				},
 			],
+			callback: (action, context) => {
+				self.action({
+					action: action.actionId,
+					options: action.options,
+				})
+			},
 		}
 
 		self.log('debug', Object.keys(actions))

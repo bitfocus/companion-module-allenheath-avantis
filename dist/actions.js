@@ -265,7 +265,7 @@ function default_1(self) {
         actions['mute_group_assign'] = self.assignActionBuilder('Assign Mute Groups for channel', self.CHOICES_INPUT_CHANNEL, 'muteGroup', self.CHOICES_MUTE_GROUP);
         actions['channel_main_assign'] = self.assignActionBuilder('Assign Channel to Main Mix', self.CHOICES_INPUT_CHANNEL, 'mainMix', self.CHOICES_MAIN_MIX);
         actions['channel_name'] = {
-            label: 'Set Channel Name',
+            name: 'Set Channel Name',
             options: [
                 {
                     type: 'dropdown',
@@ -282,9 +282,15 @@ function default_1(self) {
                     tooltip: 'In this option you can enter whatever you want as long as it is the number one',
                 },
             ],
+            callback: (action, context) => {
+                self.action({
+                    action: action.actionId,
+                    options: action.options,
+                });
+            },
         };
         actions['channel_color'] = {
-            label: 'Set Channel Color',
+            name: 'Set Channel Color',
             options: [
                 {
                     type: 'dropdown',
@@ -303,9 +309,15 @@ function default_1(self) {
                     minChoicesForSearch: 0,
                 },
             ],
+            callback: (action, context) => {
+                self.action({
+                    action: action.actionId,
+                    options: action.options,
+                });
+            },
         };
         actions['scene_recall'] = {
-            label: 'Scene recall',
+            name: 'Scene recall',
             options: [
                 {
                     type: 'dropdown',
@@ -316,6 +328,12 @@ function default_1(self) {
                     minChoicesForSearch: 0,
                 },
             ],
+            callback: (action, context) => {
+                self.action({
+                    action: action.actionId,
+                    options: action.options,
+                });
+            },
         };
         actions['send_input_to_mono_aux'] = self.sendLevelActionBuilder('Send Input to Mono Aux', self.CHOICES_INPUT_CHANNEL, self.CHOICES_MONO_AUX);
         actions['send_input_to_mono_aux_number'] = self.sendLevelActionNumberBuilder('Send Input to Mono Aux (Number)', self.CHOICES_INPUT_CHANNEL, self.CHOICES_MONO_AUX);
@@ -326,7 +344,7 @@ function default_1(self) {
         actions['send_input_to_mono_matrix'] = self.sendLevelActionBuilder('Send Input to Mono Matrix', self.CHOICES_INPUT_CHANNEL, self.CHOICES_MONO_MATRIX);
         actions['send_input_to_stereo_matrix'] = self.sendLevelActionBuilder('Send Input to Stereo Matrix', self.CHOICES_INPUT_CHANNEL, self.CHOICES_STEREO_MATRIX);
         actions['send_input_to'] = {
-            label: 'Send Input to',
+            name: 'Send Input to',
             options: [
                 {
                     type: 'dropdown',
@@ -353,6 +371,12 @@ function default_1(self) {
                     minChoicesForSearch: 0,
                 },
             ],
+            callback: (action, context) => {
+                self.action({
+                    action: action.actionId,
+                    options: action.options,
+                });
+            },
         };
         self.log('debug', Object.keys(actions));
         return actions;
