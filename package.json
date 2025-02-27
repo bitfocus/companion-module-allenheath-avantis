@@ -6,6 +6,7 @@
     "Software",
     "Allen & Heath Mixer"
   ],
+	"main": "dist/main.js",
   "manufacturer": "Allen & Heath",
   "product": "Avantis",
   "shortname": "Avantis",
