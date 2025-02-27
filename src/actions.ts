@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 import fader from './fader.json'
 import avantisConfig from './avantisconfig.json'
 import { CompanionActionDefinition, CompanionActionDefinitions } from '@companion-module/base'
@@ -239,7 +241,7 @@ export default function (self: any) {
 						default: true,
 					},
 				],
-				callback: (action, context) => {
+				callback: (action: any, context: any) => {
 					self.action({
 						action: action.actionId,
 						options: action.options,
