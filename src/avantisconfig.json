@@ -1,26 +1,26 @@
 {
-	"config" : {
+	"config": {
 		"mono": {
-			"groupCount": 	40,
-			"auxCount": 	40,
-			"matrixCount": 	40,
-			"fxSendCount": 	12
+			"groupCount": 40,
+			"auxCount": 40,
+			"matrixCount": 40,
+			"fxSendCount": 12
 		},
 		"stereo": {
-			"groupCount": 	20,
-			"auxCount": 	20,
-			"matrixCount": 	20,
-			"fxSendCount": 	12
+			"groupCount": 20,
+			"auxCount": 20,
+			"matrixCount": 20,
+			"fxSendCount": 12
 		},
-		"inputCount": 	64,
-		"mainsCount": 	3,
-		"fxReturnCount": 	12,
-		"muteGroupCount": 	8,
-		"dcaCount": 	16,
-		"dcaAssignCount": 	16,
-		"sceneCount":	500
+		"inputCount": 64,
+		"mainsCount": 3,
+		"fxReturnCount": 12,
+		"muteGroupCount": 8,
+		"dcaCount": 16,
+		"dcaAssignCount": 16,
+		"sceneCount": 500
 	},
-	"name" : {
+	"name": {
 		" ": "0x20",
 		"0": "0x30",
 		"1": "0x31",
