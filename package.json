@@ -6,7 +6,7 @@
     "Software",
     "Allen & Heath Mixer"
   ],
-	"main": "dist/main.js",
+  "main": "dist/main.js",
   "manufacturer": "Allen & Heath",
   "product": "Avantis",
   "shortname": "Avantis",
@@ -30,7 +30,7 @@
     "@companion-module/base": "~1.11.2"
   },
   "devDependencies": {
-    "@companion-module/tools": "^2.1.1",
+    "@companion-module/tools": "^2.6.1",
     "@types/node": "^22.13.5",
     "eslint": "^9.17.0",
     "husky": "^9.1.7",
