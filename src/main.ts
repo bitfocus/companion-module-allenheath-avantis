@@ -1,8 +1,8 @@
 import { InstanceBase, Regex, runEntrypoint, InstanceStatus, SomeCompanionConfigField, EmptyUpgradeScript } from '@companion-module/base'
 import UpdateActions from './actions'
 import UpdateFeedbacks from './feedbacks'
-import UpdatePresets from './presets'
 import UpdateVariableDefinitions from './variables'
+import { GetPresets } from './presets' 
 import * as net from 'net'
 import avantisConfig from './avantisconfig.json'
 
@@ -51,10 +51,13 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 	init = async (config: any) =>  {
 		this.config = config
 
+		this.updateStatus(InstanceStatus.Ok)
+
 		this.updateActions() // export actions
 		this.updateFeedbacks() // export feedbacks
-		this.updatePresets() // export presets
 		this.updateVariableDefinitions() // export variable definitions
+
+		this.setPresetDefinitions(GetPresets()) // <--- ADD THIS LINE
 
 		this.devMode = true
 		this.init_tcp()
@@ -88,10 +91,6 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 
 	updateFeedbacks() {
 		UpdateFeedbacks(this)
-	}
-
-	updatePresets() {
-		UpdatePresets(this)
 	}
 
 	updateVariableDefinitions() {
@@ -147,43 +146,26 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 		}
 
 		if (this.config.host) {
-			this.updateStatus(InstanceStatus.Connecting)
-
-			const socket = new net.Socket()
-			this.tcpSocket = socket.connect({
+			this.tcpSocket = new net.Socket().connect({
 				host: this.config.host,
 				port: PORT
 			});
 
 			this.tcpSocket.on('status_change', (status: any, message: any) => {
-				if (this.tcpSocket !== socket) return
 				this.updateStatus(status, message);
 			});
 
 			this.tcpSocket.on('error', (err: { message: string }) => {
-				if (this.tcpSocket !== socket) return
 				self.log('error', 'TCP error: ' + err.message);
-				self.updateStatus(InstanceStatus.ConnectionFailure, err.message)
 			});
 
 			this.tcpSocket.on('connect', () => {
-				if (this.tcpSocket !== socket) return
 				self.log('debug', `TCP Connected to ${this.config.host}`);
-				self.updateStatus(InstanceStatus.Ok)
-			});
-
-			this.tcpSocket.on('close', (hadError: boolean) => {
-				if (this.tcpSocket !== socket || hadError) return
-				self.log('debug', `TCP disconnected from ${this.config.host}`);
-				self.updateStatus(InstanceStatus.Disconnected)
 			});
 			
 			this.tcpSocket.on('data', (data: any) => {
-				if (this.tcpSocket !== socket) return
 				self.validateResponseData(data);
 			})
-		} else {
-			this.updateStatus(InstanceStatus.BadConfig, 'Target IP is required')
 		}
 
 	}
@@ -258,6 +240,8 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 	 * @since 1.0.0
 	 */
 	action = (action: { action: string; options: any; }) => {
+		console.log('action execute:')
+
 		var opt = action.options
 		let bufferCommands: any[] = []
 		// Have to Minus 1 for converting it to Hex on Send
@@ -386,8 +370,10 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 			// SoftKeys
 		}
 
+		console.log(bufferCommands)
+
 		for (let i = 0; i < bufferCommands.length; i++) {
-			if (this.tcpSocket && !this.tcpSocket.destroyed) {
+			if (this.tcpSocket) {
 				this.dumpData(opt, midiBase, bufferCommands)
 
 				this.log(
@@ -395,9 +381,6 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 					`sending '${bufferCommands[i].toString('hex')}' ${i}/${bufferCommands.length} via TCP @${this.config.host}`,
 				)
 				this.tcpSocket.write(bufferCommands[i])
-			} else {
-				this.log('warn', `Not connected to Avantis at ${this.config.host}`)
-				this.updateStatus(InstanceStatus.Disconnected)
 			}
 		}
 	}
@@ -473,11 +456,6 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 	buildSceneCommand(opt: { sceneNumber: string }, midiOffset: number) {
 		let scene = this.scenes[parseInt(opt.sceneNumber)]
 
-		if (!scene) {
-			this.log('warn', `Invalid scene selected: ${opt.sceneNumber}`)
-			return []
-		}
-
 		// BN, 00, Bank, CN, SS
 		return [Buffer.from([0xb0 + midiOffset, 0x00, scene.block, 0xc0 + midiOffset, scene.ss])]
 	}
@@ -522,23 +500,23 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 		return [Buffer.from([...SysExHeader, 0x00 + midiOffset, 0x06, parseInt(opt.channel), parseInt(opt.color), 0xf7])]
 	}
 
-	buildSendLevelCommand(opt: { srcChannel: string | number | Array<string | number>; destChannel: number; level: string }, baseMidi: number, srcMidiChnl: number, destMidiChnl: number) {
+	buildSendLevelCommand(opt: { srcChannel: string; destChannel: number; level: string }, baseMidi: number, srcMidiChnl: number, destMidiChnl: number) {
 		// SysEx Header, 0N, 0D, CH, SndN, SndCH, LV, F7
-		return this.toArray(opt.srcChannel).map((srcChannel) =>
+		return [
 			Buffer.from([
 				...SysExHeader,
 				0x00 + baseMidi + srcMidiChnl,
 				0x0d,
-				this.toMidiValue(srcChannel),
+				parseInt(opt.srcChannel),
 				baseMidi + destMidiChnl,
 				opt.destChannel,
 				parseInt(opt.level),
 				0xf7,
 			]),
-		)
+		]
 	}
 
-	buildSendLevelNumberCommand(opt: { level: string | number; srcChannel: string | number | Array<string | number>; destChannel: number; 'level-int': number }, baseMidi: number, srcMidiChnl: number, destMidiChnl: number) {
+	buildSendLevelNumberCommand(opt: { level: string | number; srcChannel: string; destChannel: number }, baseMidi: number, srcMidiChnl: number, destMidiChnl: number) {
 		const levelMap = [
 			['0', '0x6B'],
 			['-1', '0x69'],
@@ -562,40 +540,28 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 			['-inf', '0x00'],
 		].reverse()
 
-		const levelAsHexString = levelMap[opt['level-int']]?.[1]
-
-		if (!levelAsHexString) {
-			this.log('warn', `Invalid send level selected: ${opt['level-int']}`)
-			return []
-		}
+		// @ts-ignore
+		const levelAsHexString = levelMap[opt['level-int']][1]
 
 		this.log('debug', `levelAsHexString: ${opt.level} ${levelAsHexString}`)
 
 		// SysEx Header, 0N, 0D, CH, SndN, SndCH, LV, F7
-		return this.toArray(opt.srcChannel).map((srcChannel) =>
+		return [
 			Buffer.from([
 				...SysExHeader,
 				0x00 + baseMidi + srcMidiChnl,
 				0x0d,
-				this.toMidiValue(srcChannel),
+				parseInt(opt.srcChannel),
 				baseMidi + destMidiChnl,
 				opt.destChannel,
 				parseInt(levelAsHexString),
 				0xf7,
 			]),
-		)
+		]
 	}
 
 	dumpData(opt: any, midiBase: number, bufferCommands: any[]) {
 		console.log(`dumpData: ${JSON.stringify(opt, null, 2)} ${midiBase} ${bufferCommands}`)
-	}
-
-	toArray<T>(value: T | T[]): T[] {
-		return Array.isArray(value) ? value : [value]
-	}
-
-	toMidiValue(value: string | number) {
-		return typeof value === 'number' ? value : parseInt(value)
 	}
 }
 
