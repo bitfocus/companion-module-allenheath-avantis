@@ -40,7 +40,7 @@ export default function (self: any) {
 		self.CHOICES_STEREO_AUX = self.buildChoices(`Stereo Aux`, `Stereo Aux`, avantis.stereo.auxCount, 0x3f)
 		self.CHOICES_MONO_MATRIX = self.buildChoices(`Mono Matrix`, `Mono Matrix`, avantis.mono.matrixCount, -1)
 		self.CHOICES_STEREO_MATRIX = self.buildChoices(`Stereo Matrix`, `Stereo Matrix`, avantis.stereo.matrixCount, 0x3f)
-		self.CHOICES_MONO_FX_SEND = self.buildChoices(`Mono FX Send`, `Mono FX Send`, avantis.stereo.fxSendCount, -1)
+		self.CHOICES_MONO_FX_SEND = self.buildChoices(`Mono FX Send`, `Mono FX Send`, avantis.mono.fxSendCount, -1)
 		self.CHOICES_STEREO_FX_SEND = self.buildChoices(
 			`Stereo FX Send`,
 			`Stereo FX Send`,
