@@ -36,6 +36,18 @@ const configFields: SomeCompanionConfigField[] = [
 		min: 1,
 		max: 12,
 	},
+	{
+		type: 'dropdown',
+		label: 'Input Channel Count',
+		id: 'inputCount',
+		tooltip: 'Avantis V2.0 expands dPack systems from 64 to 96 input channels.',
+		width: 6,
+		default: 64,
+		choices: [
+			{ id: 64, label: '64 Inputs' },
+			{ id: 96, label: '96 Inputs (V2.0 dPack)' },
+		],
+	},
 ]
 
 class ModuleInstance extends InstanceBase<typeof configFields> {
@@ -44,6 +56,7 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 	config: any
 	tcpSocket: any
 	scenes: any
+	faderLevelCache: Record<string, number> = {}
 
 	tSockets: any
 	tSocket: any
@@ -57,7 +70,7 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 		this.updateFeedbacks() // export feedbacks
 		this.updateVariableDefinitions() // export variable definitions
 
-		this.setPresetDefinitions(GetPresets()) // <--- ADD THIS LINE
+		this.setPresetDefinitions(GetPresets(this.config))
 
 		this.devMode = true
 		this.init_tcp()
@@ -77,6 +90,8 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 	
 	async configUpdated(config: any) {
 		this.config = config
+		this.updateActions()
+		this.setPresetDefinitions(GetPresets(this.config))
 		this.init_tcp()
 	}
 
@@ -131,6 +146,18 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 				step: 1,
 				required: true,
 				range: false,
+			},
+			{
+				type: 'dropdown',
+				label: 'Input Channel Count',
+				id: 'inputCount',
+				tooltip: 'Avantis V2.0 expands dPack systems from 64 to 96 input channels.',
+				width: 6,
+				default: 64,
+				choices: [
+					{ id: 64, label: '64 Inputs' },
+					{ id: 96, label: '96 Inputs (V2.0 dPack)' },
+				],
 			},
 		]
 	}
@@ -255,7 +282,7 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 				break
 
 			case 'fader_input':
-				bufferCommands = this.buildFaderCommand(opt, midiBase)
+				bufferCommands = this.handleFaderAction(opt, midiBase)
 				break
 
 			case 'mute_mono_group':
@@ -265,7 +292,7 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 
 			case 'fader_mono_group':
 			case 'fader_stereo_group':
-				bufferCommands = this.buildFaderCommand(opt, midiBase + 1)
+				bufferCommands = this.handleFaderAction(opt, midiBase + 1)
 				break
 
 			case 'mute_mono_aux':
@@ -275,7 +302,7 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 
 			case 'fader_mono_aux':
 			case 'fader_stereo_aux':
-				bufferCommands = this.buildFaderCommand(opt, midiBase + 2)
+				bufferCommands = this.handleFaderAction(opt, midiBase + 2)
 				break
 
 			case 'mute_mono_matrix':
@@ -285,7 +312,7 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 
 			case 'fader_mono_matrix':
 			case 'fader_stereo_matrix':
-				bufferCommands = this.buildFaderCommand(opt, midiBase + 3)
+				bufferCommands = this.handleFaderAction(opt, midiBase + 3)
 				break
 
 			case 'mute_mono_fx_send':
@@ -302,7 +329,7 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 			case 'fader_stereo_fx_send':
 			case 'fader_fx_return':
 			case 'fader_master':
-				bufferCommands = this.buildFaderCommand(opt, midiBase + 4)
+				bufferCommands = this.handleFaderAction(opt, midiBase + 4)
 				break
 
 			case 'dca_assign':
@@ -390,8 +417,65 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 		return [Buffer.from([0x90 + midiOffset, opt.channel, opt.mute ? 0x7f : 0x3f, 0x90 + midiOffset, opt.channel, 0x00])]
 	}
 
+	handleFaderAction(opt: { level: string; channel: number; fadeDuration?: string | number }, midiOffset: number) {
+		const fadeDuration = parseFloat(opt.fadeDuration as unknown as string ?? '0')
+		if (!isNaN(fadeDuration) && fadeDuration > 0) {
+			this.fadeFaderCommand(opt, midiOffset, fadeDuration)
+			return []
+		}
+
+		return this.buildFaderCommand(opt, midiOffset)
+	}
+
+	fadeFaderCommand(opt: { level: string; channel: number | string; fadeDuration?: string | number }, midiOffset: number, fadeDuration: number) {
+		const targetLevel = parseInt(opt.level)
+		const channel = Number(opt.channel)
+		const key = `${midiOffset}:${channel}`
+		const startLevel = this.faderLevelCache[key]
+
+		if (startLevel === undefined || startLevel === targetLevel) {
+			this.log('debug', `fadeFaderCommand: no cached start level or already at target for ${key}, sending direct command`)
+			this.tcpSocket?.write(this.buildFaderCommand({ ...opt, channel }, midiOffset)[0])
+			this.faderLevelCache[key] = targetLevel
+			return
+		}
+
+		const stepCount = Math.max(2, Math.min(40, Math.round(fadeDuration * 10)))
+		const diff = targetLevel - startLevel
+		const values: number[] = []
+
+		for (let i = 1; i <= stepCount; i++) {
+			values.push(Math.round(startLevel + (diff * i) / stepCount))
+		}
+
+		const uniqueValues = [...new Set(values)]
+		const intervalMs = Math.max(50, Math.round((fadeDuration * 1000) / uniqueValues.length))
+
+		uniqueValues.forEach((level, index) => {
+			setTimeout(() => {
+				const command = Buffer.from([
+					0xb0 + midiOffset,
+					0x63,
+					channel,
+					0xb0 + midiOffset,
+					0x62,
+					0x17,
+					0xb0 + midiOffset,
+					0x06,
+					level,
+				])
+
+				this.dumpData(opt, midiOffset, [command])
+				this.log('debug', `fadeFaderCommand sending level ${level} for ${key} @${(index + 1)}/${uniqueValues.length}`)
+				this.tcpSocket?.write(command)
+				this.faderLevelCache[key] = level
+			}, intervalMs * index)
+		})
+	}
+
 	buildFaderCommand(opt: { level: string; channel: number }, midiOffset: number) {
 		let faderLevel = parseInt(opt.level)
+		this.faderLevelCache[`${midiOffset}:${opt.channel}`] = faderLevel
 
 		// BN, 63, CH, BN, 62, 17, BN, 06, LV
 		return [

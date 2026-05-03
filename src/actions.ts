@@ -12,6 +12,7 @@ export default function (self: any) {
 		let actions: CompanionActionDefinitions = {}
 
 		var avantis = avantisConfig['config']
+		const inputCount = self.config?.inputCount ?? avantis.inputCount
 
 		self.buildChoices = (name, key, qty, ofs) => {
 			const choice = {
@@ -29,7 +30,7 @@ export default function (self: any) {
 		// CHOICES
 		// -----------------------
 
-		self.CHOICES_INPUT_CHANNEL = self.buildChoices(`Input Channel`, `CH`, avantis.inputCount, -1)
+		self.CHOICES_INPUT_CHANNEL = self.buildChoices(`Input Channel`, `CH`, inputCount, -1)
 		self.CHOICES_SCENES = self.buildChoices(`Scene`, `SCENE`, avantis.sceneCount, -1)
 		self.CHOICES_DCA = self.buildChoices(`DCA`, `DCA`, avantis.dcaCount, 0x35)
 		self.CHOICES_MUTE_GROUP = self.buildChoices(`Mute Group`, `MUTE`, avantis.muteGroupCount, 0x45)
@@ -126,6 +127,16 @@ export default function (self: any) {
 						default: 1 + self.CHOICES_FADER.offset,
 						choices: self.CHOICES_FADER.values,
 						minChoicesForSearch: 0,
+					},
+					{
+						type: 'number',
+						label: 'Fade Duration (seconds)',
+						id: 'fadeDuration',
+						min: 0,
+						max: 20,
+						step: 0.5,
+						default: 0,
+						tooltip: 'Optional smooth fade duration; 0 = immediate.',
 					},
 				],
 				callback: (action, context) => {

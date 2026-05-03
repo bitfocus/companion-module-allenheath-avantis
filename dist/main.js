@@ -29,8 +29,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const base_1 = require("@companion-module/base");
 const actions_1 = __importDefault(require("./actions"));
 const feedbacks_1 = __importDefault(require("./feedbacks"));
-const presets_1 = __importDefault(require("./presets"));
 const variables_1 = __importDefault(require("./variables"));
+const presets_1 = require("./presets");
 const net = __importStar(require("net"));
 const avantisconfig_json_1 = __importDefault(require("./avantisconfig.json"));
 const PORT = 51325;
@@ -61,20 +61,34 @@ const configFields = [
         min: 1,
         max: 12,
     },
+    {
+        type: 'dropdown',
+        label: 'Input Channel Count',
+        id: 'inputCount',
+        tooltip: 'Avantis V2.0 expands dPack systems from 64 to 96 input channels.',
+        width: 6,
+        default: 64,
+        choices: [
+            { id: 64, label: '64 Inputs' },
+            { id: 96, label: '96 Inputs (V2.0 dPack)' },
+        ],
+    },
 ];
 class ModuleInstance extends base_1.InstanceBase {
     devMode;
     config;
     tcpSocket;
     scenes;
+    faderLevelCache = {};
     tSockets;
     tSocket;
     init = async (config) => {
         this.config = config;
+        this.updateStatus(base_1.InstanceStatus.Ok);
         this.updateActions(); // export actions
         this.updateFeedbacks(); // export feedbacks
-        this.updatePresets(); // export presets
         this.updateVariableDefinitions(); // export variable definitions
+        this.setPresetDefinitions((0, presets_1.GetPresets)(this.config));
         this.devMode = true;
         this.init_tcp();
         this.setupSceneSelection();
@@ -88,6 +102,8 @@ class ModuleInstance extends base_1.InstanceBase {
     };
     async configUpdated(config) {
         this.config = config;
+        this.updateActions();
+        this.setPresetDefinitions((0, presets_1.GetPresets)(this.config));
         this.init_tcp();
     }
     // Return config fields for web config
@@ -99,9 +115,6 @@ class ModuleInstance extends base_1.InstanceBase {
     };
     updateFeedbacks() {
         (0, feedbacks_1.default)(this);
-    }
-    updatePresets() {
-        (0, presets_1.default)(this);
     }
     updateVariableDefinitions() {
         (0, variables_1.default)(this);
@@ -141,6 +154,18 @@ class ModuleInstance extends base_1.InstanceBase {
                 required: true,
                 range: false,
             },
+            {
+                type: 'dropdown',
+                label: 'Input Channel Count',
+                id: 'inputCount',
+                tooltip: 'Avantis V2.0 expands dPack systems from 64 to 96 input channels.',
+                width: 6,
+                default: 64,
+                choices: [
+                    { id: 64, label: '64 Inputs' },
+                    { id: 96, label: '96 Inputs (V2.0 dPack)' },
+                ],
+            },
         ];
     }
     init_tcp = async () => {
@@ -150,43 +175,22 @@ class ModuleInstance extends base_1.InstanceBase {
             delete this.tcpSocket;
         }
         if (this.config.host) {
-            this.updateStatus(base_1.InstanceStatus.Connecting);
-            const socket = new net.Socket();
-            this.tcpSocket = socket.connect({
+            this.tcpSocket = new net.Socket().connect({
                 host: this.config.host,
                 port: PORT
             });
             this.tcpSocket.on('status_change', (status, message) => {
-                if (this.tcpSocket !== socket)
-                    return;
                 this.updateStatus(status, message);
             });
             this.tcpSocket.on('error', (err) => {
-                if (this.tcpSocket !== socket)
-                    return;
                 self.log('error', 'TCP error: ' + err.message);
-                self.updateStatus(base_1.InstanceStatus.ConnectionFailure, err.message);
             });
             this.tcpSocket.on('connect', () => {
-                if (this.tcpSocket !== socket)
-                    return;
                 self.log('debug', `TCP Connected to ${this.config.host}`);
-                self.updateStatus(base_1.InstanceStatus.Ok);
-            });
-            this.tcpSocket.on('close', (hadError) => {
-                if (this.tcpSocket !== socket || hadError)
-                    return;
-                self.log('debug', `TCP disconnected from ${this.config.host}`);
-                self.updateStatus(base_1.InstanceStatus.Disconnected);
             });
             this.tcpSocket.on('data', (data) => {
-                if (this.tcpSocket !== socket)
-                    return;
                 self.validateResponseData(data);
             });
-        }
-        else {
-            this.updateStatus(base_1.InstanceStatus.BadConfig, 'Target IP is required');
         }
     };
     updateVariables() {
@@ -247,6 +251,7 @@ class ModuleInstance extends base_1.InstanceBase {
      * @since 1.0.0
      */
     action = (action) => {
+        console.log('action execute:');
         var opt = action.options;
         let bufferCommands = [];
         // Have to Minus 1 for converting it to Hex on Send
@@ -257,7 +262,7 @@ class ModuleInstance extends base_1.InstanceBase {
                 bufferCommands = this.buildMuteCommand(opt, midiBase);
                 break;
             case 'fader_input':
-                bufferCommands = this.buildFaderCommand(opt, midiBase);
+                bufferCommands = this.handleFaderAction(opt, midiBase);
                 break;
             case 'mute_mono_group':
             case 'mute_stereo_group':
@@ -265,7 +270,7 @@ class ModuleInstance extends base_1.InstanceBase {
                 break;
             case 'fader_mono_group':
             case 'fader_stereo_group':
-                bufferCommands = this.buildFaderCommand(opt, midiBase + 1);
+                bufferCommands = this.handleFaderAction(opt, midiBase + 1);
                 break;
             case 'mute_mono_aux':
             case 'mute_stereo_aux':
@@ -273,7 +278,7 @@ class ModuleInstance extends base_1.InstanceBase {
                 break;
             case 'fader_mono_aux':
             case 'fader_stereo_aux':
-                bufferCommands = this.buildFaderCommand(opt, midiBase + 2);
+                bufferCommands = this.handleFaderAction(opt, midiBase + 2);
                 break;
             case 'mute_mono_matrix':
             case 'mute_stereo_matrix':
@@ -281,7 +286,7 @@ class ModuleInstance extends base_1.InstanceBase {
                 break;
             case 'fader_mono_matrix':
             case 'fader_stereo_matrix':
-                bufferCommands = this.buildFaderCommand(opt, midiBase + 3);
+                bufferCommands = this.handleFaderAction(opt, midiBase + 3);
                 break;
             case 'mute_mono_fx_send':
             case 'mute_stereo_fx_send':
@@ -296,7 +301,7 @@ class ModuleInstance extends base_1.InstanceBase {
             case 'fader_stereo_fx_send':
             case 'fader_fx_return':
             case 'fader_master':
-                bufferCommands = this.buildFaderCommand(opt, midiBase + 4);
+                bufferCommands = this.handleFaderAction(opt, midiBase + 4);
                 break;
             case 'dca_assign':
                 bufferCommands = this.buildAssignCommands(opt, midiBase + 4, true);
@@ -347,15 +352,12 @@ class ModuleInstance extends base_1.InstanceBase {
             // MIDI Strips
             // SoftKeys
         }
+        console.log(bufferCommands);
         for (let i = 0; i < bufferCommands.length; i++) {
-            if (this.tcpSocket && !this.tcpSocket.destroyed) {
+            if (this.tcpSocket) {
                 this.dumpData(opt, midiBase, bufferCommands);
                 this.log('debug', `sending '${bufferCommands[i].toString('hex')}' ${i}/${bufferCommands.length} via TCP @${this.config.host}`);
                 this.tcpSocket.write(bufferCommands[i]);
-            }
-            else {
-                this.log('warn', `Not connected to Avantis at ${this.config.host}`);
-                this.updateStatus(base_1.InstanceStatus.Disconnected);
             }
         }
     };
@@ -363,8 +365,56 @@ class ModuleInstance extends base_1.InstanceBase {
         // 9N, CH, 7F(3F), 9N, CH, 00
         return [Buffer.from([0x90 + midiOffset, opt.channel, opt.mute ? 0x7f : 0x3f, 0x90 + midiOffset, opt.channel, 0x00])];
     }
+    handleFaderAction(opt, midiOffset) {
+        const fadeDuration = parseFloat(opt.fadeDuration ?? '0');
+        if (!isNaN(fadeDuration) && fadeDuration > 0) {
+            this.fadeFaderCommand(opt, midiOffset, fadeDuration);
+            return [];
+        }
+        return this.buildFaderCommand(opt, midiOffset);
+    }
+    fadeFaderCommand(opt, midiOffset, fadeDuration) {
+        const targetLevel = parseInt(opt.level);
+        const channel = Number(opt.channel);
+        const key = `${midiOffset}:${channel}`;
+        const startLevel = this.faderLevelCache[key];
+        if (startLevel === undefined || startLevel === targetLevel) {
+            this.log('debug', `fadeFaderCommand: no cached start level or already at target for ${key}, sending direct command`);
+            this.tcpSocket?.write(this.buildFaderCommand({ ...opt, channel }, midiOffset)[0]);
+            this.faderLevelCache[key] = targetLevel;
+            return;
+        }
+        const stepCount = Math.max(2, Math.min(40, Math.round(fadeDuration * 10)));
+        const diff = targetLevel - startLevel;
+        const values = [];
+        for (let i = 1; i <= stepCount; i++) {
+            values.push(Math.round(startLevel + (diff * i) / stepCount));
+        }
+        const uniqueValues = [...new Set(values)];
+        const intervalMs = Math.max(50, Math.round((fadeDuration * 1000) / uniqueValues.length));
+        uniqueValues.forEach((level, index) => {
+            setTimeout(() => {
+                const command = Buffer.from([
+                    0xb0 + midiOffset,
+                    0x63,
+                    channel,
+                    0xb0 + midiOffset,
+                    0x62,
+                    0x17,
+                    0xb0 + midiOffset,
+                    0x06,
+                    level,
+                ]);
+                this.dumpData(opt, midiOffset, [command]);
+                this.log('debug', `fadeFaderCommand sending level ${level} for ${key} @${(index + 1)}/${uniqueValues.length}`);
+                this.tcpSocket?.write(command);
+                this.faderLevelCache[key] = level;
+            }, intervalMs * index);
+        });
+    }
     buildFaderCommand(opt, midiOffset) {
         let faderLevel = parseInt(opt.level);
+        this.faderLevelCache[`${midiOffset}:${opt.channel}`] = faderLevel;
         // BN, 63, CH, BN, 62, 17, BN, 06, LV
         return [
             Buffer.from([
@@ -421,10 +471,6 @@ class ModuleInstance extends base_1.InstanceBase {
     }
     buildSceneCommand(opt, midiOffset) {
         let scene = this.scenes[parseInt(opt.sceneNumber)];
-        if (!scene) {
-            this.log('warn', `Invalid scene selected: ${opt.sceneNumber}`);
-            return [];
-        }
         // BN, 00, Bank, CN, SS
         return [Buffer.from([0xb0 + midiOffset, 0x00, scene.block, 0xc0 + midiOffset, scene.ss])];
     }
@@ -465,16 +511,18 @@ class ModuleInstance extends base_1.InstanceBase {
     }
     buildSendLevelCommand(opt, baseMidi, srcMidiChnl, destMidiChnl) {
         // SysEx Header, 0N, 0D, CH, SndN, SndCH, LV, F7
-        return this.toArray(opt.srcChannel).map((srcChannel) => Buffer.from([
-            ...SysExHeader,
-            0x00 + baseMidi + srcMidiChnl,
-            0x0d,
-            this.toMidiValue(srcChannel),
-            baseMidi + destMidiChnl,
-            opt.destChannel,
-            parseInt(opt.level),
-            0xf7,
-        ]));
+        return [
+            Buffer.from([
+                ...SysExHeader,
+                0x00 + baseMidi + srcMidiChnl,
+                0x0d,
+                parseInt(opt.srcChannel),
+                baseMidi + destMidiChnl,
+                opt.destChannel,
+                parseInt(opt.level),
+                0xf7,
+            ]),
+        ];
     }
     buildSendLevelNumberCommand(opt, baseMidi, srcMidiChnl, destMidiChnl) {
         const levelMap = [
@@ -499,32 +547,25 @@ class ModuleInstance extends base_1.InstanceBase {
             ['-40', '0x1B'],
             ['-inf', '0x00'],
         ].reverse();
-        const levelAsHexString = levelMap[opt['level-int']]?.[1];
-        if (!levelAsHexString) {
-            this.log('warn', `Invalid send level selected: ${opt['level-int']}`);
-            return [];
-        }
+        // @ts-ignore
+        const levelAsHexString = levelMap[opt['level-int']][1];
         this.log('debug', `levelAsHexString: ${opt.level} ${levelAsHexString}`);
         // SysEx Header, 0N, 0D, CH, SndN, SndCH, LV, F7
-        return this.toArray(opt.srcChannel).map((srcChannel) => Buffer.from([
-            ...SysExHeader,
-            0x00 + baseMidi + srcMidiChnl,
-            0x0d,
-            this.toMidiValue(srcChannel),
-            baseMidi + destMidiChnl,
-            opt.destChannel,
-            parseInt(levelAsHexString),
-            0xf7,
-        ]));
+        return [
+            Buffer.from([
+                ...SysExHeader,
+                0x00 + baseMidi + srcMidiChnl,
+                0x0d,
+                parseInt(opt.srcChannel),
+                baseMidi + destMidiChnl,
+                opt.destChannel,
+                parseInt(levelAsHexString),
+                0xf7,
+            ]),
+        ];
     }
     dumpData(opt, midiBase, bufferCommands) {
         console.log(`dumpData: ${JSON.stringify(opt, null, 2)} ${midiBase} ${bufferCommands}`);
-    }
-    toArray(value) {
-        return Array.isArray(value) ? value : [value];
-    }
-    toMidiValue(value) {
-        return typeof value === 'number' ? value : parseInt(value);
     }
 }
 (0, base_1.runEntrypoint)(ModuleInstance, [base_1.EmptyUpgradeScript]);
