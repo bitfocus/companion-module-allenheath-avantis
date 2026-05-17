@@ -43,8 +43,9 @@ function GetPresets(config) {
     const channelRange = (start, end) => Array.from({ length: end - start + 1 }, (_value, index) => start + index);
     for (let channel = 1; channel <= inputCount; channel++) {
         const channelId = inputChannel(channel);
-        addButton(`mute_input_${channel}`, 'Input Mutes', `Mute CH ${channel}`, `CH ${channel}\nMUTE`, [{ actionId: 'mute_input', options: { channel: channelId, mute: true } }], RED);
-        addButton(`unmute_input_${channel}`, 'Input Mutes', `Unmute CH ${channel}`, `CH ${channel}\nON`, [{ actionId: 'mute_input', options: { channel: channelId, mute: false } }], GREEN);
+        addButton(`mute_input_${channel}`, 'Input Mutes', `Mute CH ${channel}`, `CH ${channel}\nMUTE`, [{ actionId: 'mute_input', options: { channel: channelId, mute: 'mute' } }], RED);
+        addButton(`unmute_input_${channel}`, 'Input Mutes', `Unmute CH ${channel}`, `CH ${channel}\nON`, [{ actionId: 'mute_input', options: { channel: channelId, mute: 'unmute' } }], GREEN);
+        addButton(`toggle_mute_input_${channel}`, 'Input Mutes', `Toggle Mute CH ${channel}`, `CH ${channel}\nTOGGLE`, [{ actionId: 'mute_input', options: { channel: channelId, mute: 'toggle' } }], AMBER, BLACK);
         addButton(`fader_input_0db_${channel}`, 'Input Faders', `CH ${channel} to 0 dB`, `CH ${channel}\n0 dB`, [{ actionId: 'fader_input', options: { channel: channelId, level: 0x6b } }], BLUE);
         addButton(`fader_input_off_${channel}`, 'Input Faders', `CH ${channel} to -inf`, `CH ${channel}\n-inf`, [{ actionId: 'fader_input', options: { channel: channelId, level: 0x00 } }], BLACK);
     }
@@ -52,39 +53,42 @@ function GetPresets(config) {
         const end = Math.min(start + 7, inputCount);
         const muteActions = channelRange(start, end).map((channel) => ({
             actionId: 'mute_input',
-            options: { channel: inputChannel(channel), mute: true },
+            options: { channel: inputChannel(channel), mute: 'mute' },
         }));
         const unmuteActions = channelRange(start, end).map((channel) => ({
             actionId: 'mute_input',
-            options: { channel: inputChannel(channel), mute: false },
+            options: { channel: inputChannel(channel), mute: 'unmute' },
         }));
         addButton(`mute_input_bank_${start}_${end}`, 'Input Bank Mutes', `Mute CH ${start}-${end}`, `CH ${start}-${end}\nMUTE`, muteActions, RED);
         addButton(`unmute_input_bank_${start}_${end}`, 'Input Bank Mutes', `Unmute CH ${start}-${end}`, `CH ${start}-${end}\nON`, unmuteActions, GREEN);
     }
     addButton('mute_all_inputs', 'Input Bank Mutes', 'Mute All Inputs', `ALL CH\nMUTE`, channelRange(1, inputCount).map((channel) => ({
         actionId: 'mute_input',
-        options: { channel: inputChannel(channel), mute: true },
+        options: { channel: inputChannel(channel), mute: 'mute' },
     })), RED);
     addButton('unmute_all_inputs', 'Input Bank Mutes', 'Unmute All Inputs', `ALL CH\nON`, channelRange(1, inputCount).map((channel) => ({
         actionId: 'mute_input',
-        options: { channel: inputChannel(channel), mute: false },
+        options: { channel: inputChannel(channel), mute: 'unmute' },
     })), GREEN);
     for (let mix = 1; mix <= avantis.mainsCount; mix++) {
         const mixId = mainMix(mix);
-        addButton(`mute_main_${mix}`, 'Main Mix', `Mute Main ${mix}`, `MAIN ${mix}\nMUTE`, [{ actionId: 'mute_master', options: { channel: mixId, mute: true } }], RED);
-        addButton(`unmute_main_${mix}`, 'Main Mix', `Unmute Main ${mix}`, `MAIN ${mix}\nON`, [{ actionId: 'mute_master', options: { channel: mixId, mute: false } }], GREEN);
+        addButton(`mute_main_${mix}`, 'Main Mix', `Mute Main ${mix}`, `MAIN ${mix}\nMUTE`, [{ actionId: 'mute_master', options: { channel: mixId, mute: 'mute' } }], RED);
+        addButton(`unmute_main_${mix}`, 'Main Mix', `Unmute Main ${mix}`, `MAIN ${mix}\nON`, [{ actionId: 'mute_master', options: { channel: mixId, mute: 'unmute' } }], GREEN);
+        addButton(`toggle_mute_main_${mix}`, 'Main Mix', `Toggle Mute Main ${mix}`, `MAIN ${mix}\nTOGGLE`, [{ actionId: 'mute_master', options: { channel: mixId, mute: 'toggle' } }], AMBER, BLACK);
         addButton(`fader_main_0db_${mix}`, 'Main Mix', `Main ${mix} to 0 dB`, `MAIN ${mix}\n0 dB`, [{ actionId: 'fader_master', options: { channel: mixId, level: 0x6b } }], BLUE);
     }
     for (let dcaNumber = 1; dcaNumber <= avantis.dcaCount; dcaNumber++) {
         const dcaId = dca(dcaNumber);
-        addButton(`mute_dca_${dcaNumber}`, 'DCA', `Mute DCA ${dcaNumber}`, `DCA ${dcaNumber}\nMUTE`, [{ actionId: 'mute_dca', options: { channel: dcaId, mute: true } }], RED);
-        addButton(`unmute_dca_${dcaNumber}`, 'DCA', `Unmute DCA ${dcaNumber}`, `DCA ${dcaNumber}\nON`, [{ actionId: 'mute_dca', options: { channel: dcaId, mute: false } }], GREEN);
+        addButton(`mute_dca_${dcaNumber}`, 'DCA', `Mute DCA ${dcaNumber}`, `DCA ${dcaNumber}\nMUTE`, [{ actionId: 'mute_dca', options: { channel: dcaId, mute: 'mute' } }], RED);
+        addButton(`unmute_dca_${dcaNumber}`, 'DCA', `Unmute DCA ${dcaNumber}`, `DCA ${dcaNumber}\nON`, [{ actionId: 'mute_dca', options: { channel: dcaId, mute: 'unmute' } }], GREEN);
+        addButton(`toggle_mute_dca_${dcaNumber}`, 'DCA', `Toggle Mute DCA ${dcaNumber}`, `DCA ${dcaNumber}\nTOGGLE`, [{ actionId: 'mute_dca', options: { channel: dcaId, mute: 'toggle' } }], AMBER, BLACK);
         addButton(`fader_dca_0db_${dcaNumber}`, 'DCA', `DCA ${dcaNumber} to 0 dB`, `DCA ${dcaNumber}\n0 dB`, [{ actionId: 'fader_DCA', options: { channel: dcaId, level: 0x6b } }], BLUE);
     }
     for (let group = 1; group <= avantis.muteGroupCount; group++) {
         const groupId = muteGroup(group);
-        addButton(`mute_group_${group}`, 'Mute Groups', `Mute Group ${group}`, `MUTE GRP ${group}\nMUTE`, [{ actionId: 'mute_group', options: { channel: groupId, mute: true } }], RED);
-        addButton(`unmute_group_${group}`, 'Mute Groups', `Unmute Group ${group}`, `MUTE GRP ${group}\nON`, [{ actionId: 'mute_group', options: { channel: groupId, mute: false } }], GREEN);
+        addButton(`mute_group_${group}`, 'Mute Groups', `Mute Group ${group}`, `MUTE GRP ${group}\nMUTE`, [{ actionId: 'mute_group', options: { channel: groupId, mute: 'mute' } }], RED);
+        addButton(`unmute_group_${group}`, 'Mute Groups', `Unmute Group ${group}`, `MUTE GRP ${group}\nON`, [{ actionId: 'mute_group', options: { channel: groupId, mute: 'unmute' } }], GREEN);
+        addButton(`toggle_mute_group_${group}`, 'Mute Groups', `Toggle Mute Group ${group}`, `MUTE GRP ${group}\nTOGGLE`, [{ actionId: 'mute_group', options: { channel: groupId, mute: 'toggle' } }], AMBER, BLACK);
     }
     for (let scene = 1; scene <= Math.min(avantis.sceneCount, 100); scene++) {
         const bankStart = Math.floor((scene - 1) / 25) * 25 + 1;

@@ -57,6 +57,7 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 	tcpSocket: any
 	scenes: any
 	faderLevelCache: Record<string, number> = {}
+	muteStateCache: Record<string, boolean> = {}
 
 	tSockets: any
 	tSocket: any
@@ -206,6 +207,8 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 			return
 		}
 
+		this.updateMuteStateFromResponse(data)
+
 		const val = JSON.parse(JSON.stringify(data))['data']
 
 		if (!val) {
@@ -213,6 +216,19 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 		}
 
 		console.log(`Response DATA:  ${JSON.stringify(val, null, 2)}`)
+	}
+
+	updateMuteStateFromResponse(data: Buffer) {
+		for (let i = 0; i <= data.length - 3; i++) {
+			const status = data[i]
+			const value = data[i + 2]
+
+			if ((status & 0xf0) === 0x90 && (value === 0x7f || value === 0x3f)) {
+				const midiOffset = status & 0x0f
+				const channel = data[i + 1]
+				this.muteStateCache[`${midiOffset}:${channel}`] = value === 0x7f
+			}
+		}
 	}
 
 	/**
@@ -413,8 +429,24 @@ class ModuleInstance extends InstanceBase<typeof configFields> {
 	}
 
 	buildMuteCommand(opt: { channel: number; mute: any }, midiOffset: number) {
+		const muteState = this.resolveMuteState(opt, midiOffset)
+
 		// 9N, CH, 7F(3F), 9N, CH, 00
-		return [Buffer.from([0x90 + midiOffset, opt.channel, opt.mute ? 0x7f : 0x3f, 0x90 + midiOffset, opt.channel, 0x00])]
+		return [Buffer.from([0x90 + midiOffset, opt.channel, muteState ? 0x7f : 0x3f, 0x90 + midiOffset, opt.channel, 0x00])]
+	}
+
+	resolveMuteState(opt: { channel: number; mute: any }, midiOffset: number) {
+		const key = `${midiOffset}:${opt.channel}`
+
+		if (opt.mute === 'toggle') {
+			const nextState = !this.muteStateCache[key]
+			this.muteStateCache[key] = nextState
+			return nextState
+		}
+
+		const muteState = opt.mute === true || opt.mute === 'true' || opt.mute === 'mute'
+		this.muteStateCache[key] = muteState
+		return muteState
 	}
 
 	handleFaderAction(opt: { level: string; channel: number; fadeDuration?: string | number }, midiOffset: number) {

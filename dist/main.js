@@ -80,6 +80,7 @@ class ModuleInstance extends base_1.InstanceBase {
     tcpSocket;
     scenes;
     faderLevelCache = {};
+    muteStateCache = {};
     tSockets;
     tSocket;
     init = async (config) => {
@@ -200,11 +201,23 @@ class ModuleInstance extends base_1.InstanceBase {
         if (!data) {
             return;
         }
+        this.updateMuteStateFromResponse(data);
         const val = JSON.parse(JSON.stringify(data))['data'];
         if (!val) {
             return;
         }
         console.log(`Response DATA:  ${JSON.stringify(val, null, 2)}`);
+    }
+    updateMuteStateFromResponse(data) {
+        for (let i = 0; i <= data.length - 3; i++) {
+            const status = data[i];
+            const value = data[i + 2];
+            if ((status & 0xf0) === 0x90 && (value === 0x7f || value === 0x3f)) {
+                const midiOffset = status & 0x0f;
+                const channel = data[i + 1];
+                this.muteStateCache[`${midiOffset}:${channel}`] = value === 0x7f;
+            }
+        }
     }
     /**
      * Sets up a Constant Scenes selection.
@@ -362,8 +375,20 @@ class ModuleInstance extends base_1.InstanceBase {
         }
     };
     buildMuteCommand(opt, midiOffset) {
+        const muteState = this.resolveMuteState(opt, midiOffset);
         // 9N, CH, 7F(3F), 9N, CH, 00
-        return [Buffer.from([0x90 + midiOffset, opt.channel, opt.mute ? 0x7f : 0x3f, 0x90 + midiOffset, opt.channel, 0x00])];
+        return [Buffer.from([0x90 + midiOffset, opt.channel, muteState ? 0x7f : 0x3f, 0x90 + midiOffset, opt.channel, 0x00])];
+    }
+    resolveMuteState(opt, midiOffset) {
+        const key = `${midiOffset}:${opt.channel}`;
+        if (opt.mute === 'toggle') {
+            const nextState = !this.muteStateCache[key];
+            this.muteStateCache[key] = nextState;
+            return nextState;
+        }
+        const muteState = opt.mute === true || opt.mute === 'true' || opt.mute === 'mute';
+        this.muteStateCache[key] = muteState;
+        return muteState;
     }
     handleFaderAction(opt, midiOffset) {
         const fadeDuration = parseFloat(opt.fadeDuration ?? '0');

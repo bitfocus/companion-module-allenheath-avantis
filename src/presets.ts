@@ -63,7 +63,7 @@ export function GetPresets(config?: any): CompanionPresetDefinitions {
 			'Input Mutes',
 			`Mute CH ${channel}`,
 			`CH ${channel}\nMUTE`,
-			[{ actionId: 'mute_input', options: { channel: channelId, mute: true } }],
+			[{ actionId: 'mute_input', options: { channel: channelId, mute: 'mute' } }],
 			RED,
 		)
 
@@ -72,8 +72,18 @@ export function GetPresets(config?: any): CompanionPresetDefinitions {
 			'Input Mutes',
 			`Unmute CH ${channel}`,
 			`CH ${channel}\nON`,
-			[{ actionId: 'mute_input', options: { channel: channelId, mute: false } }],
+			[{ actionId: 'mute_input', options: { channel: channelId, mute: 'unmute' } }],
 			GREEN,
+		)
+
+		addButton(
+			`toggle_mute_input_${channel}`,
+			'Input Mutes',
+			`Toggle Mute CH ${channel}`,
+			`CH ${channel}\nTOGGLE`,
+			[{ actionId: 'mute_input', options: { channel: channelId, mute: 'toggle' } }],
+			AMBER,
+			BLACK,
 		)
 
 		addButton(
@@ -99,11 +109,11 @@ export function GetPresets(config?: any): CompanionPresetDefinitions {
 		const end = Math.min(start + 7, inputCount)
 		const muteActions = channelRange(start, end).map((channel) => ({
 			actionId: 'mute_input',
-			options: { channel: inputChannel(channel), mute: true },
+			options: { channel: inputChannel(channel), mute: 'mute' },
 		}))
 		const unmuteActions = channelRange(start, end).map((channel) => ({
 			actionId: 'mute_input',
-			options: { channel: inputChannel(channel), mute: false },
+			options: { channel: inputChannel(channel), mute: 'unmute' },
 		}))
 
 		addButton(
@@ -132,7 +142,7 @@ export function GetPresets(config?: any): CompanionPresetDefinitions {
 		`ALL CH\nMUTE`,
 		channelRange(1, inputCount).map((channel) => ({
 			actionId: 'mute_input',
-			options: { channel: inputChannel(channel), mute: true },
+			options: { channel: inputChannel(channel), mute: 'mute' },
 		})),
 		RED,
 	)
@@ -144,7 +154,7 @@ export function GetPresets(config?: any): CompanionPresetDefinitions {
 		`ALL CH\nON`,
 		channelRange(1, inputCount).map((channel) => ({
 			actionId: 'mute_input',
-			options: { channel: inputChannel(channel), mute: false },
+			options: { channel: inputChannel(channel), mute: 'unmute' },
 		})),
 		GREEN,
 	)
@@ -157,7 +167,7 @@ export function GetPresets(config?: any): CompanionPresetDefinitions {
 			'Main Mix',
 			`Mute Main ${mix}`,
 			`MAIN ${mix}\nMUTE`,
-			[{ actionId: 'mute_master', options: { channel: mixId, mute: true } }],
+			[{ actionId: 'mute_master', options: { channel: mixId, mute: 'mute' } }],
 			RED,
 		)
 
@@ -166,8 +176,18 @@ export function GetPresets(config?: any): CompanionPresetDefinitions {
 			'Main Mix',
 			`Unmute Main ${mix}`,
 			`MAIN ${mix}\nON`,
-			[{ actionId: 'mute_master', options: { channel: mixId, mute: false } }],
+			[{ actionId: 'mute_master', options: { channel: mixId, mute: 'unmute' } }],
 			GREEN,
+		)
+
+		addButton(
+			`toggle_mute_main_${mix}`,
+			'Main Mix',
+			`Toggle Mute Main ${mix}`,
+			`MAIN ${mix}\nTOGGLE`,
+			[{ actionId: 'mute_master', options: { channel: mixId, mute: 'toggle' } }],
+			AMBER,
+			BLACK,
 		)
 
 		addButton(
@@ -188,7 +208,7 @@ export function GetPresets(config?: any): CompanionPresetDefinitions {
 			'DCA',
 			`Mute DCA ${dcaNumber}`,
 			`DCA ${dcaNumber}\nMUTE`,
-			[{ actionId: 'mute_dca', options: { channel: dcaId, mute: true } }],
+			[{ actionId: 'mute_dca', options: { channel: dcaId, mute: 'mute' } }],
 			RED,
 		)
 
@@ -197,8 +217,18 @@ export function GetPresets(config?: any): CompanionPresetDefinitions {
 			'DCA',
 			`Unmute DCA ${dcaNumber}`,
 			`DCA ${dcaNumber}\nON`,
-			[{ actionId: 'mute_dca', options: { channel: dcaId, mute: false } }],
+			[{ actionId: 'mute_dca', options: { channel: dcaId, mute: 'unmute' } }],
 			GREEN,
+		)
+
+		addButton(
+			`toggle_mute_dca_${dcaNumber}`,
+			'DCA',
+			`Toggle Mute DCA ${dcaNumber}`,
+			`DCA ${dcaNumber}\nTOGGLE`,
+			[{ actionId: 'mute_dca', options: { channel: dcaId, mute: 'toggle' } }],
+			AMBER,
+			BLACK,
 		)
 
 		addButton(
@@ -219,7 +249,7 @@ export function GetPresets(config?: any): CompanionPresetDefinitions {
 			'Mute Groups',
 			`Mute Group ${group}`,
 			`MUTE GRP ${group}\nMUTE`,
-			[{ actionId: 'mute_group', options: { channel: groupId, mute: true } }],
+			[{ actionId: 'mute_group', options: { channel: groupId, mute: 'mute' } }],
 			RED,
 		)
 
@@ -228,8 +258,18 @@ export function GetPresets(config?: any): CompanionPresetDefinitions {
 			'Mute Groups',
 			`Unmute Group ${group}`,
 			`MUTE GRP ${group}\nON`,
-			[{ actionId: 'mute_group', options: { channel: groupId, mute: false } }],
+			[{ actionId: 'mute_group', options: { channel: groupId, mute: 'unmute' } }],
 			GREEN,
+		)
+
+		addButton(
+			`toggle_mute_group_${group}`,
+			'Mute Groups',
+			`Toggle Mute Group ${group}`,
+			`MUTE GRP ${group}\nTOGGLE`,
+			[{ actionId: 'mute_group', options: { channel: groupId, mute: 'toggle' } }],
+			AMBER,
+			BLACK,
 		)
 	}
 

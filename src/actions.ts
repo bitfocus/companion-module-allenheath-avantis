@@ -93,10 +93,16 @@ export default function (self: any) {
 						minChoicesForSearch: 0,
 					},
 					{
-						type: 'checkbox',
+						type: 'dropdown',
 						label: 'Mute',
 						id: 'mute',
-						default: true,
+						default: 'mute',
+						choices: [
+							{ label: 'Mute', id: 'mute' },
+							{ label: 'Unmute', id: 'unmute' },
+							{ label: 'Toggle', id: 'toggle' },
+						],
+						minChoicesForSearch: 0,
 					},
 				],
 				callback: (action, context) => {

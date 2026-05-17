@@ -5,7 +5,7 @@ Controls the Allen & Heath Avantis mixer.
 ## Functions:
 
 - Faders: Input, Mix Master, FX Send, FX Return, DCA
-- Mutes: Input, Mix Master, FX Send, FX Return, DCA, Mute Groups
+- Mutes: Input, Mix Master, FX Send, FX Return, DCA, Mute Groups (Mute, Unmute, Toggle)
 - Send Levels: Aux, FX, Matrix Sends
 - DCA Assign
 - Input to Main Assign
