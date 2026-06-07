@@ -1,14 +1,12 @@
 import { InstanceBase, InstanceStatus, } from '@companion-module/base';
-import { createRequire } from 'node:module';
 import * as net from 'net';
 import UpdateActions from './actions.js';
+import avantisConfig from './avantisconfig.json' with { type: 'json' };
 import { GetConfigFields } from './config.js';
 import UpdateFeedbacks from './feedbacks.js';
 import UpdatePresets from './presets.js';
 import { UpgradeScripts } from './upgrades.js';
 import UpdateVariableDefinitions from './variables.js';
-const require = createRequire(import.meta.url);
-const avantisConfig = require('./avantisconfig.json');
 const PORT = 51325;
 const SysExHeader = [0xf0, 0x00, 0x00, 0x1a, 0x50, 0x10, 0x01, 0x00];
 const configFields = GetConfigFields();

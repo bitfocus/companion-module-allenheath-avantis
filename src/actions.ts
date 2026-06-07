@@ -6,12 +6,9 @@ import {
 	type CompanionOptionValues,
 	type DropdownChoice,
 } from '@companion-module/base'
-import { createRequire } from 'node:module'
+import avantisConfig from './avantisconfig.json' with { type: 'json' }
+import fader from './fader.json' with { type: 'json' }
 import type ModuleInstance from './main.js'
-
-const require = createRequire(import.meta.url)
-const fader = require('./fader.json') as { level: [string, string][] }
-const avantisConfig = require('./avantisconfig.json') as typeof import('./avantisconfig.json')
 
 type ChoiceGroup = {
 	name: string

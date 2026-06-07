@@ -1,7 +1,5 @@
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
-const fader = require('./fader.json');
-const avantisConfig = require('./avantisconfig.json');
+import avantisConfig from './avantisconfig.json' with { type: 'json' };
+import fader from './fader.json' with { type: 'json' };
 function buildChoices(name, key, quantity, offset) {
     const values = [];
     for (let i = 1; i <= quantity; i++) {

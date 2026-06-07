@@ -4,12 +4,9 @@ import {
 	type CompanionPresetSection,
 	type CompanionSimplePresetDefinition,
 } from '@companion-module/base'
-import { createRequire } from 'node:module'
+import avantisConfig from './avantisconfig.json' with { type: 'json' }
 import type ModuleInstance from './main.js'
 import type { ModuleSchema } from './main.js'
-
-const require = createRequire(import.meta.url)
-const avantisConfig = require('./avantisconfig.json') as typeof import('./avantisconfig.json')
 
 function buildMutePreset(
 	id: string,
