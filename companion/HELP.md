@@ -4,20 +4,16 @@ Controls the Allen & Heath Avantis mixer.
 
 ## Functions:
 
-- Faders: Input, Mix Master, FX Send, FX Return, DCA
-- Mutes: Input, Mix Master, FX Send, FX Return, DCA, Mute Groups
-- Send Levels: Aux, FX, Matrix Sends
-- DCA Assign
-- Input to Main Assign
-- Name & Color
-- Scene Recall
-- MIDI Transport
-- MIDI Strips
-- SoftKeys
+- Faders: Input, main mix, mono/stereo groups, mono/stereo auxes, mono/stereo matrices, mono/stereo FX sends, FX returns, and DCA
+- Mutes: Input, main mix, mono/stereo groups, mono/stereo auxes, mono/stereo matrices, mono/stereo FX sends, FX returns, DCA, and mute groups
+- Send levels: Input to aux, FX send/return, matrix, and main mix destinations
+- Assignments: DCA, mute group, and input to main mix
+- Channel controls: Name and color
+- Scene recall
 
 ## Setup
 
-- Enter the Target IP address of your Avantis console.
-- Enter the MIDI base channel, which can be found on your Avantis under Utility > MIDI.
+- Enter the target IP address of your Avantis console.
+- Enter the MIDI base channel configured on the console under Utility > Control > MIDI.
 
-> Current version: 1.10
+> Current version: 2.0.0

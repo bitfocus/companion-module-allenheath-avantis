@@ -1,493 +1,397 @@
-// @ts-nocheck
+import {
+	type CompanionActionDefinition,
+	type CompanionActionDefinitions,
+	type CompanionActionEvent,
+	type CompanionActionSchema,
+	type CompanionOptionValues,
+	type DropdownChoice,
+} from '@companion-module/base'
+import { createRequire } from 'node:module'
+import type ModuleInstance from './main.js'
 
-import fader from './fader.json'
-import avantisConfig from './avantisconfig.json'
-import { CompanionActionDefinition, CompanionActionDefinitions } from '@companion-module/base'
+const require = createRequire(import.meta.url)
+const fader = require('./fader.json') as { level: [string, string][] }
+const avantisConfig = require('./avantisconfig.json') as typeof import('./avantisconfig.json')
 
-// update actions
-export default function (self: any) {
-	self.getActions = () => {
-		self.log('debug', 'getActions')
+type ChoiceGroup = {
+	name: string
+	offset: number
+	values: DropdownChoice[]
+}
 
-		let actions: CompanionActionDefinitions = {}
+export type ActionsSchema = Record<string, CompanionActionSchema<CompanionOptionValues>>
 
-		var avantis = avantisConfig['config']
+function buildChoices(name: string, key: string, quantity: number, offset: number): ChoiceGroup {
+	const values: DropdownChoice[] = []
 
-		self.buildChoices = (name, key, qty, ofs) => {
-			const choice = {
-				name: name,
-				offset: ofs,
-				values: [],
-			}
-			for (let i = 1; i <= qty; i++) {
-				choice.values.push({ label: `${key} ${i}`, id: i + ofs, offset: ofs })
-			}
-			return choice
-		}
-
-		// -----------------------
-		// CHOICES
-		// -----------------------
-
-		self.CHOICES_INPUT_CHANNEL = self.buildChoices(`Input Channel`, `CH`, avantis.inputCount, -1)
-		self.CHOICES_SCENES = self.buildChoices(`Scene`, `SCENE`, avantis.sceneCount, -1)
-		self.CHOICES_DCA = self.buildChoices(`DCA`, `DCA`, avantis.dcaCount, 0x35)
-		self.CHOICES_MUTE_GROUP = self.buildChoices(`Mute Group`, `MUTE`, avantis.muteGroupCount, 0x45)
-		self.CHOICES_MAIN_MIX = self.buildChoices(`Main Mix`, `MAIN`, avantis.mainsCount, 0x2f)
-		self.CHOICES_MONO_GROUP = self.buildChoices(`Mono Group`, `Mono Group`, avantis.mono.groupCount, -1)
-		self.CHOICES_STEREO_GROUP = self.buildChoices(`Stereo Group`, `Stereo Group`, avantis.stereo.groupCount, 0x3f)
-		self.CHOICES_MONO_AUX = self.buildChoices(`Mono Aux`, `Mono Aux`, avantis.mono.auxCount, -1)
-		self.CHOICES_STEREO_AUX = self.buildChoices(`Stereo Aux`, `Stereo Aux`, avantis.stereo.auxCount, 0x3f)
-		self.CHOICES_MONO_MATRIX = self.buildChoices(`Mono Matrix`, `Mono Matrix`, avantis.mono.matrixCount, -1)
-		self.CHOICES_STEREO_MATRIX = self.buildChoices(`Stereo Matrix`, `Stereo Matrix`, avantis.stereo.matrixCount, 0x3f)
-		self.CHOICES_MONO_FX_SEND = self.buildChoices(`Mono FX Send`, `Mono FX Send`, avantis.stereo.fxSendCount, -1)
-		self.CHOICES_STEREO_FX_SEND = self.buildChoices(
-			`Stereo FX Send`,
-			`Stereo FX Send`,
-			avantis.stereo.fxSendCount,
-			0x0f,
-		)
-		self.CHOICES_FX_RETURN = self.buildChoices(`FX Return`, `FX Return`, avantis.fxReturnCount, 0x1f)
-
-		self.CHOICES_FADER = {
-			name: `Fader Level`,
-			offset: -1,
-			values: [],
-		}
-		for (let i = 0; i < fader.level.length; i++) {
-			let dbStr = fader.level[i][0]
-			// TODO: Check if the Offset fixes the fader changed value
-			self.CHOICES_FADER.values.push({ label: `${dbStr} dB`, id: parseInt(fader.level[i][1], 16) })
-		}
-
-		self.CHOICES_COLOR = {
-			name: `Color`,
-			offset: -1,
-			values: [
-				{ label: `Off`, id: 0 },
-				{ label: `Red`, id: 1 },
-				{ label: `Green`, id: 2 },
-				{ label: `Yellow`, id: 3 },
-				{ label: `Blue`, id: 4 },
-				{ label: `Purple`, id: 5 },
-				{ label: `Lt Blue`, id: 6 },
-				{ label: `White`, id: 7 },
-			],
-		}
-
-		// -----------------------
-		// OPTIONS
-		// -----------------------
-
-		self.muteActionBuilder = (label, choice): CompanionActionDefinition => {
-			return {
-				name: label,
-				options: [
-					{
-						type: 'dropdown',
-						label: choice.name,
-						id: 'channel',
-						default: 1 + choice.offset,
-						choices: choice.values,
-						minChoicesForSearch: 0,
-					},
-					{
-						type: 'checkbox',
-						label: 'Mute',
-						id: 'mute',
-						default: true,
-					},
-				],
-				callback: (action, context) => {
-					self.action({
-						action: action.actionId,
-						options: action.options,
-					})
-				},
-			}
-		}
-
-		self.faderActionBuilder = (label, choice) => {
-			return {
-				name: label,
-				options: [
-					{
-						type: 'dropdown',
-						label: choice.name,
-						id: 'channel',
-						default: 1 + choice.offset,
-						choices: choice.values,
-						minChoicesForSearch: 0,
-					},
-					{
-						type: 'dropdown',
-						label: self.CHOICES_FADER.name,
-						id: 'level',
-						default: 1 + self.CHOICES_FADER.offset,
-						choices: self.CHOICES_FADER.values,
-						minChoicesForSearch: 0,
-					},
-				],
-				callback: (action, context) => {
-					self.action({
-						action: action.actionId,
-						options: action.options,
-					})
-				},
-			}
-		}
-
-		self.sendLevelActionBuilder = (label, srcChoice, destChoice) => {
-			return {
-				name: label,
-				options: [
-					{
-						type: 'dropdown',
-						label: srcChoice.name,
-						id: 'srcChannel',
-						default: [],
-						multiple: true,
-						choices: srcChoice.values,
-						minChoicesForSearch: 0,
-					},
-					{
-						type: 'dropdown',
-						label: destChoice.name,
-						id: 'destChannel',
-						default: 1 + destChoice.offset,
-						choices: destChoice.values,
-						minChoicesForSearch: 0,
-					},
-					{
-						type: 'dropdown',
-						label: self.CHOICES_FADER.name,
-						id: 'level',
-						default: 1 + self.CHOICES_FADER.offset,
-						choices: self.CHOICES_FADER.values,
-						minChoicesForSearch: 0,
-					},
-				],
-				callback: (action, context) => {
-					self.action({
-						action: action.actionId,
-						options: action.options,
-					})
-				},
-			}
-		}
-
-		self.sendLevelActionNumberBuilder = (label, srcChoice, destChoice) => {
-			return {
-				name: label,
-				options: [
-					{
-						type: 'dropdown',
-						label: srcChoice.name,
-						id: 'srcChannel',
-						default: 1 + srcChoice.offset,
-						choices: srcChoice.values,
-						minChoicesForSearch: 0,
-					},
-					{
-						type: 'dropdown',
-						label: destChoice.name,
-						id: 'destChannel',
-						default: 1 + destChoice.offset,
-						choices: destChoice.values,
-						minChoicesForSearch: 0,
-					},
-					{
-						type: 'number',
-						label: 'Level (0-20)',
-						id: 'level-int',
-						min: 0,
-						max: 19,
-						step: 1,
-					},
-				],
-				callback: (action, context) => {
-					self.action({
-						action: action.actionId,
-						options: action.options,
-					})
-				},
-			}
-		}
-
-		self.assignActionBuilder = (label, srcChoice, destId, destChoice) => {
-			return {
-				name: label,
-				options: [
-					{
-						type: 'dropdown',
-						label: srcChoice.name,
-						id: 'channel',
-						default: 1 + srcChoice.offset,
-						choices: srcChoice.values,
-						minChoicesForSearch: 0,
-					},
-					{
-						type: 'dropdown',
-						label: destChoice.name,
-						id: destId,
-						default: [],
-						multiple: true,
-						choices: destChoice.values,
-					},
-					{
-						type: 'checkbox',
-						label: 'Assign',
-						id: 'assign',
-						default: true,
-					},
-				],
-				callback: (action: any, context: any) => {
-					self.action({
-						action: action.actionId,
-						options: action.options,
-					})
-				},
-			}
-		}
-
-		// -----------------------
-		// ACTIONS
-		// -----------------------
-
-		actions['mute_input'] = self.muteActionBuilder('Mute Input', self.CHOICES_INPUT_CHANNEL)
-		actions['mute_master'] = self.muteActionBuilder('Mute Main', self.CHOICES_MAIN_MIX)
-
-		actions['mute_mono_group'] = self.muteActionBuilder('Mute Mono Group', self.CHOICES_MONO_GROUP)
-		actions['mute_stereo_group'] = self.muteActionBuilder('Mute Stereo Group', self.CHOICES_STEREO_GROUP)
-
-		actions['mute_mono_aux'] = self.muteActionBuilder('Mute Mono Aux', self.CHOICES_MONO_AUX)
-		actions['mute_stereo_aux'] = self.muteActionBuilder('Mute Stereo Aux', self.CHOICES_STEREO_AUX)
-
-		actions['mute_mono_matrix'] = self.muteActionBuilder('Mute Mono Matrix', self.CHOICES_MONO_MATRIX)
-		actions['mute_stereo_matrix'] = self.muteActionBuilder('Mute Stereo Matrix', self.CHOICES_STEREO_MATRIX)
-
-		actions['mute_mono_fx_send'] = self.muteActionBuilder('Mute Mono FX Send', self.CHOICES_MONO_FX_SEND)
-		actions['mute_stereo_fx_send'] = self.muteActionBuilder('Mute Stereo FX Send', self.CHOICES_STEREO_FX_SEND)
-		actions['mute_fx_return'] = self.muteActionBuilder('Mute FX Return', self.CHOICES_FX_RETURN)
-
-		actions['mute_group'] = self.muteActionBuilder('Mute Group', self.CHOICES_MUTE_GROUP)
-		actions['mute_dca'] = self.muteActionBuilder('Mute DCA', self.CHOICES_DCA)
-
-		actions['fader_input'] = self.faderActionBuilder('Set Input Fader to Level', self.CHOICES_INPUT_CHANNEL)
-		actions['fader_mono_group'] = self.faderActionBuilder(
-			'Set Mono Group Master Fader to Level',
-			self.CHOICES_MONO_GROUP,
-		)
-		actions['fader_stereo_group'] = self.faderActionBuilder(
-			'Set Stereo Group Master Fader to Level',
-			self.CHOICES_STEREO_GROUP,
-		)
-		actions['fader_mono_aux'] = self.faderActionBuilder('Set Mono Aux Master Fader to Level', self.CHOICES_MONO_AUX)
-		actions['fader_stereo_aux'] = self.faderActionBuilder(
-			'Set Stereo Aux Master Fader to Level',
-			self.CHOICES_STEREO_AUX,
-		)
-		actions['fader_mono_matrix'] = self.faderActionBuilder(
-			'Set Mono Matrix Master Fader to Level',
-			self.CHOICES_MONO_MATRIX,
-		)
-		actions['fader_stereo_matrix'] = self.faderActionBuilder(
-			'Set Stereo Matrix Master Fader to Level',
-			self.CHOICES_STEREO_MATRIX,
-		)
-		actions['fader_mono_fx_send'] = self.faderActionBuilder(
-			'Set Mono FX Send Master Fader to Level',
-			self.CHOICES_MONO_FX_SEND,
-		)
-		actions['fader_stereo_fx_send'] = self.faderActionBuilder(
-			'Set Stereo FX Send Master Fader to Level',
-			self.CHOICES_STEREO_FX_SEND,
-		)
-		actions['fader_master'] = self.faderActionBuilder('Set Main Master Fader to Level', self.CHOICES_MAIN_MIX)
-		actions['fader_fx_return'] = self.faderActionBuilder('Set FX Return Fader to Level', self.CHOICES_FX_RETURN)
-		actions['fader_DCA'] = self.faderActionBuilder('Set DCA Fader to Level', self.CHOICES_DCA)
-
-		actions['dca_assign'] = self.assignActionBuilder(
-			'Assign DCA Groups for channel',
-			self.CHOICES_INPUT_CHANNEL,
-			'dcaGroup',
-			self.CHOICES_DCA,
-		)
-		actions['mute_group_assign'] = self.assignActionBuilder(
-			'Assign Mute Groups for channel',
-			self.CHOICES_INPUT_CHANNEL,
-			'muteGroup',
-			self.CHOICES_MUTE_GROUP,
-		)
-		actions['channel_main_assign'] = self.assignActionBuilder(
-			'Assign Channel to Main Mix',
-			self.CHOICES_INPUT_CHANNEL,
-			'mainMix',
-			self.CHOICES_MAIN_MIX,
-		)
-
-		actions['channel_name'] = {
-			name: 'Set Channel Name',
-			options: [
-				{
-					type: 'dropdown',
-					label: self.CHOICES_INPUT_CHANNEL.name,
-					id: 'channel',
-					default: 1 + self.CHOICES_INPUT_CHANNEL.offset,
-					choices: self.CHOICES_INPUT_CHANNEL.values,
-					minChoicesForSearch: 0,
-				},
-				{
-					type: 'textinput',
-					label: 'Name of the Channel',
-					id: 'channelName',
-					tooltip: 'In this option you can enter whatever you want as long as it is the number one',
-				},
-			],
-			callback: (action, context) => {
-				self.action({
-					action: action.actionId,
-					options: action.options,
-				})
-			},
-		}
-
-		actions['channel_color'] = {
-			name: 'Set Channel Color',
-			options: [
-				{
-					type: 'dropdown',
-					label: self.CHOICES_INPUT_CHANNEL.name,
-					id: 'channel',
-					default: 1 + self.CHOICES_INPUT_CHANNEL.offset,
-					choices: self.CHOICES_INPUT_CHANNEL.values,
-					minChoicesForSearch: 0,
-				},
-				{
-					type: 'dropdown',
-					label: self.CHOICES_COLOR.name,
-					id: 'color',
-					default: 1 + self.CHOICES_COLOR.offset,
-					choices: self.CHOICES_COLOR.values,
-					minChoicesForSearch: 0,
-				},
-			],
-			callback: (action, context) => {
-				self.action({
-					action: action.actionId,
-					options: action.options,
-				})
-			},
-		}
-
-		actions['scene_recall'] = {
-			name: 'Scene recall',
-			options: [
-				{
-					type: 'dropdown',
-					label: self.CHOICES_SCENES.name,
-					id: 'sceneNumber',
-					default: 1 + self.CHOICES_SCENES.offset,
-					choices: self.CHOICES_SCENES.values,
-					minChoicesForSearch: 0,
-				},
-			],
-			callback: (action, context) => {
-				self.action({
-					action: action.actionId,
-					options: action.options,
-				})
-			},
-		}
-
-		actions['send_input_to_mono_aux'] = self.sendLevelActionBuilder(
-			'Send Input to Mono Aux',
-			self.CHOICES_INPUT_CHANNEL,
-			self.CHOICES_MONO_AUX,
-		)
-
-		actions['send_input_to_mono_aux_number'] = self.sendLevelActionNumberBuilder(
-			'Send Input to Mono Aux (Number)',
-			self.CHOICES_INPUT_CHANNEL,
-			self.CHOICES_MONO_AUX,
-		)
-
-		actions['send_input_to_stereo_aux'] = self.sendLevelActionBuilder(
-			'Send Input to Stereo Aux',
-			self.CHOICES_INPUT_CHANNEL,
-			self.CHOICES_STEREO_AUX,
-		)
-
-		actions['send_input_to_fx_return'] = self.sendLevelActionBuilder(
-			'Send Input to FX Return',
-			self.CHOICES_INPUT_CHANNEL,
-			self.CHOICES_FX_RETURN,
-		)
-
-		actions['send_input_to_mono_fx_return'] = self.sendLevelActionBuilder(
-			'Send Input to Mono FX Return',
-			self.CHOICES_INPUT_CHANNEL,
-			self.CHOICES_MONO_FX_SEND,
-		)
-
-		actions['send_input_to_stereo_fx_return'] = self.sendLevelActionBuilder(
-			'Send Input to Stereo FX Return',
-			self.CHOICES_INPUT_CHANNEL,
-			self.CHOICES_STEREO_FX_SEND,
-		)
-
-		actions['send_input_to_mono_matrix'] = self.sendLevelActionBuilder(
-			'Send Input to Mono Matrix',
-			self.CHOICES_INPUT_CHANNEL,
-			self.CHOICES_MONO_MATRIX,
-		)
-
-		actions['send_input_to_stereo_matrix'] = self.sendLevelActionBuilder(
-			'Send Input to Stereo Matrix',
-			self.CHOICES_INPUT_CHANNEL,
-			self.CHOICES_STEREO_MATRIX,
-		)
-
-		actions['send_input_to'] = {
-			name: 'Send Input to',
-			options: [
-				{
-					type: 'dropdown',
-					label: self.CHOICES_INPUT_CHANNEL.name,
-					id: 'srcChannel',
-					default: 1 + self.CHOICES_INPUT_CHANNEL.offset,
-					choices: self.CHOICES_INPUT_CHANNEL.values,
-					minChoicesForSearch: 0,
-				},
-				{
-					type: 'dropdown',
-					label: self.CHOICES_MAIN_MIX.name,
-					id: 'destChannel',
-					default: 1 + self.CHOICES_MAIN_MIX.offset,
-					choices: self.CHOICES_MAIN_MIX.values,
-					minChoicesForSearch: 0,
-				},
-				{
-					type: 'dropdown',
-					label: self.CHOICES_FADER.name,
-					id: 'level',
-					default: 1 + self.CHOICES_FADER.offset,
-					choices: self.CHOICES_FADER.values,
-					minChoicesForSearch: 0,
-				},
-			],
-			callback: (action, context) => {
-				self.action({
-					action: action.actionId,
-					options: action.options,
-				})
-			},
-		}
-
-		self.log('debug', Object.keys(actions))
-
-		return actions
+	for (let i = 1; i <= quantity; i++) {
+		values.push({ label: `${key} ${i}`, id: i + offset })
 	}
 
-	self.setActionDefinitions(self.getActions())
+	return {
+		name,
+		offset,
+		values,
+	}
 }
+
+function dispatchAction(self: ModuleInstance, action: CompanionActionEvent): void {
+	self.action({
+		action: action.actionId,
+		options: action.options,
+	})
+}
+
+export function UpdateActions(self: ModuleInstance): void {
+	self.log('debug', 'UpdateActions')
+
+	const actions: CompanionActionDefinitions = {}
+	const avantis = avantisConfig.config
+
+	const inputChannels = buildChoices('Input Channel', 'CH', avantis.inputCount, -1)
+	const scenes = buildChoices('Scene', 'SCENE', avantis.sceneCount, -1)
+	const dca = buildChoices('DCA', 'DCA', avantis.dcaCount, 0x35)
+	const muteGroups = buildChoices('Mute Group', 'MUTE', avantis.muteGroupCount, 0x45)
+	const mainMix = buildChoices('Main Mix', 'MAIN', avantis.mainsCount, 0x2f)
+	const monoGroups = buildChoices('Mono Group', 'Mono Group', avantis.mono.groupCount, -1)
+	const stereoGroups = buildChoices('Stereo Group', 'Stereo Group', avantis.stereo.groupCount, 0x3f)
+	const monoAuxes = buildChoices('Mono Aux', 'Mono Aux', avantis.mono.auxCount, -1)
+	const stereoAuxes = buildChoices('Stereo Aux', 'Stereo Aux', avantis.stereo.auxCount, 0x3f)
+	const monoMatrices = buildChoices('Mono Matrix', 'Mono Matrix', avantis.mono.matrixCount, -1)
+	const stereoMatrices = buildChoices('Stereo Matrix', 'Stereo Matrix', avantis.stereo.matrixCount, 0x3f)
+	const monoFxSends = buildChoices('Mono FX Send', 'Mono FX Send', avantis.stereo.fxSendCount, -1)
+	const stereoFxSends = buildChoices('Stereo FX Send', 'Stereo FX Send', avantis.stereo.fxSendCount, 0x0f)
+	const fxReturns = buildChoices('FX Return', 'FX Return', avantis.fxReturnCount, 0x1f)
+
+	const faderChoices: ChoiceGroup = {
+		name: 'Fader Level',
+		offset: -1,
+		values: fader.level.map(([dbValue, hexValue]) => ({
+			label: `${dbValue} dB`,
+			id: parseInt(hexValue, 16),
+		})),
+	}
+
+	const colorChoices: ChoiceGroup = {
+		name: 'Color',
+		offset: -1,
+		values: [
+			{ label: 'Off', id: 0 },
+			{ label: 'Red', id: 1 },
+			{ label: 'Green', id: 2 },
+			{ label: 'Yellow', id: 3 },
+			{ label: 'Blue', id: 4 },
+			{ label: 'Purple', id: 5 },
+			{ label: 'Lt Blue', id: 6 },
+			{ label: 'White', id: 7 },
+		],
+	}
+
+	const muteActionBuilder = (label: string, choice: ChoiceGroup): CompanionActionDefinition => ({
+		name: label,
+		options: [
+			{
+				type: 'dropdown',
+				label: choice.name,
+				id: 'channel',
+				default: 1 + choice.offset,
+				choices: choice.values,
+				minChoicesForSearch: 0,
+			},
+			{
+				type: 'checkbox',
+				label: 'Mute',
+				id: 'mute',
+				default: true,
+			},
+		],
+		callback: (action) => dispatchAction(self, action),
+	})
+
+	const faderActionBuilder = (label: string, choice: ChoiceGroup): CompanionActionDefinition => ({
+		name: label,
+		options: [
+			{
+				type: 'dropdown',
+				label: choice.name,
+				id: 'channel',
+				default: 1 + choice.offset,
+				choices: choice.values,
+				minChoicesForSearch: 0,
+			},
+			{
+				type: 'dropdown',
+				label: faderChoices.name,
+				id: 'level',
+				default: 1 + faderChoices.offset,
+				choices: faderChoices.values,
+				minChoicesForSearch: 0,
+			},
+		],
+		callback: (action) => dispatchAction(self, action),
+	})
+
+	const sendLevelActionBuilder = (
+		label: string,
+		srcChoice: ChoiceGroup,
+		destChoice: ChoiceGroup,
+	): CompanionActionDefinition => ({
+		name: label,
+		options: [
+			{
+				type: 'multidropdown',
+				label: srcChoice.name,
+				id: 'srcChannel',
+				default: [],
+				choices: srcChoice.values,
+				minChoicesForSearch: 0,
+			},
+			{
+				type: 'dropdown',
+				label: destChoice.name,
+				id: 'destChannel',
+				default: 1 + destChoice.offset,
+				choices: destChoice.values,
+				minChoicesForSearch: 0,
+			},
+			{
+				type: 'dropdown',
+				label: faderChoices.name,
+				id: 'level',
+				default: 1 + faderChoices.offset,
+				choices: faderChoices.values,
+				minChoicesForSearch: 0,
+			},
+		],
+		callback: (action) => dispatchAction(self, action),
+	})
+
+	const sendLevelActionNumberBuilder = (
+		label: string,
+		srcChoice: ChoiceGroup,
+		destChoice: ChoiceGroup,
+	): CompanionActionDefinition => ({
+		name: label,
+		options: [
+			{
+				type: 'dropdown',
+				label: srcChoice.name,
+				id: 'srcChannel',
+				default: 1 + srcChoice.offset,
+				choices: srcChoice.values,
+				minChoicesForSearch: 0,
+			},
+			{
+				type: 'dropdown',
+				label: destChoice.name,
+				id: 'destChannel',
+				default: 1 + destChoice.offset,
+				choices: destChoice.values,
+				minChoicesForSearch: 0,
+			},
+			{
+				type: 'number',
+				label: 'Level (0-20)',
+				id: 'level-int',
+				default: 0,
+				min: 0,
+				max: 19,
+				step: 1,
+			},
+		],
+		callback: (action) => dispatchAction(self, action),
+	})
+
+	const assignActionBuilder = (
+		label: string,
+		srcChoice: ChoiceGroup,
+		destId: string,
+		destChoice: ChoiceGroup,
+	): CompanionActionDefinition => ({
+		name: label,
+		options: [
+			{
+				type: 'dropdown',
+				label: srcChoice.name,
+				id: 'channel',
+				default: 1 + srcChoice.offset,
+				choices: srcChoice.values,
+				minChoicesForSearch: 0,
+			},
+			{
+				type: 'multidropdown',
+				label: destChoice.name,
+				id: destId,
+				default: [],
+				choices: destChoice.values,
+			},
+			{
+				type: 'checkbox',
+				label: 'Assign',
+				id: 'assign',
+				default: true,
+			},
+		],
+		callback: (action) => dispatchAction(self, action),
+	})
+
+	actions['mute_input'] = muteActionBuilder('Mute Input', inputChannels)
+		actions['mute_master'] = muteActionBuilder('Mute Main Mix', mainMix)
+	actions['mute_mono_group'] = muteActionBuilder('Mute Mono Group', monoGroups)
+	actions['mute_stereo_group'] = muteActionBuilder('Mute Stereo Group', stereoGroups)
+	actions['mute_mono_aux'] = muteActionBuilder('Mute Mono Aux', monoAuxes)
+	actions['mute_stereo_aux'] = muteActionBuilder('Mute Stereo Aux', stereoAuxes)
+	actions['mute_mono_matrix'] = muteActionBuilder('Mute Mono Matrix', monoMatrices)
+	actions['mute_stereo_matrix'] = muteActionBuilder('Mute Stereo Matrix', stereoMatrices)
+	actions['mute_mono_fx_send'] = muteActionBuilder('Mute Mono FX Send', monoFxSends)
+	actions['mute_stereo_fx_send'] = muteActionBuilder('Mute Stereo FX Send', stereoFxSends)
+	actions['mute_fx_return'] = muteActionBuilder('Mute FX Return', fxReturns)
+	actions['mute_group'] = muteActionBuilder('Mute Group', muteGroups)
+	actions['mute_dca'] = muteActionBuilder('Mute DCA', dca)
+
+	actions['fader_input'] = faderActionBuilder('Set Input Fader to Level', inputChannels)
+	actions['fader_mono_group'] = faderActionBuilder('Set Mono Group Master Fader to Level', monoGroups)
+	actions['fader_stereo_group'] = faderActionBuilder('Set Stereo Group Master Fader to Level', stereoGroups)
+	actions['fader_mono_aux'] = faderActionBuilder('Set Mono Aux Master Fader to Level', monoAuxes)
+	actions['fader_stereo_aux'] = faderActionBuilder('Set Stereo Aux Master Fader to Level', stereoAuxes)
+	actions['fader_mono_matrix'] = faderActionBuilder('Set Mono Matrix Master Fader to Level', monoMatrices)
+	actions['fader_stereo_matrix'] = faderActionBuilder('Set Stereo Matrix Master Fader to Level', stereoMatrices)
+	actions['fader_mono_fx_send'] = faderActionBuilder('Set Mono FX Send Master Fader to Level', monoFxSends)
+	actions['fader_stereo_fx_send'] = faderActionBuilder('Set Stereo FX Send Master Fader to Level', stereoFxSends)
+		actions['fader_master'] = faderActionBuilder('Set Main Mix Master Fader to Level', mainMix)
+	actions['fader_fx_return'] = faderActionBuilder('Set FX Return Fader to Level', fxReturns)
+	actions['fader_DCA'] = faderActionBuilder('Set DCA Fader to Level', dca)
+
+		actions['dca_assign'] = assignActionBuilder('Assign DCA Groups for Channel', inputChannels, 'dcaGroup', dca)
+	actions['mute_group_assign'] = assignActionBuilder(
+			'Assign Mute Groups for Channel',
+		inputChannels,
+		'muteGroup',
+		muteGroups,
+	)
+	actions['channel_main_assign'] = assignActionBuilder('Assign Channel to Main Mix', inputChannels, 'mainMix', mainMix)
+
+	actions['channel_name'] = {
+		name: 'Set Channel Name',
+		options: [
+			{
+				type: 'dropdown',
+				label: inputChannels.name,
+				id: 'channel',
+				default: 1 + inputChannels.offset,
+				choices: inputChannels.values,
+				minChoicesForSearch: 0,
+			},
+			{
+				type: 'textinput',
+				label: 'Name of the Channel',
+				id: 'channelName',
+				tooltip: 'In this option you can enter whatever you want as long as it is the number one',
+			},
+		],
+		callback: (action) => dispatchAction(self, action),
+	}
+
+	actions['channel_color'] = {
+		name: 'Set Channel Color',
+		options: [
+			{
+				type: 'dropdown',
+				label: inputChannels.name,
+				id: 'channel',
+				default: 1 + inputChannels.offset,
+				choices: inputChannels.values,
+				minChoicesForSearch: 0,
+			},
+			{
+				type: 'dropdown',
+				label: colorChoices.name,
+				id: 'color',
+				default: 1 + colorChoices.offset,
+				choices: colorChoices.values,
+				minChoicesForSearch: 0,
+			},
+		],
+		callback: (action) => dispatchAction(self, action),
+	}
+
+	actions['scene_recall'] = {
+			name: 'Scene Recall',
+		options: [
+			{
+				type: 'dropdown',
+				label: scenes.name,
+				id: 'sceneNumber',
+				default: 1 + scenes.offset,
+				choices: scenes.values,
+				minChoicesForSearch: 0,
+			},
+		],
+		callback: (action) => dispatchAction(self, action),
+	}
+
+	actions['send_input_to_mono_aux'] = sendLevelActionBuilder('Send Input to Mono Aux', inputChannels, monoAuxes)
+	actions['send_input_to_mono_aux_number'] = sendLevelActionNumberBuilder(
+		'Send Input to Mono Aux (Number)',
+		inputChannels,
+		monoAuxes,
+	)
+	actions['send_input_to_stereo_aux'] = sendLevelActionBuilder('Send Input to Stereo Aux', inputChannels, stereoAuxes)
+	actions['send_input_to_fx_return'] = sendLevelActionBuilder('Send Input to FX Return', inputChannels, fxReturns)
+	actions['send_input_to_mono_fx_return'] = sendLevelActionBuilder(
+		'Send Input to Mono FX Return',
+		inputChannels,
+		monoFxSends,
+	)
+	actions['send_input_to_stereo_fx_return'] = sendLevelActionBuilder(
+		'Send Input to Stereo FX Return',
+		inputChannels,
+		stereoFxSends,
+	)
+	actions['send_input_to_mono_matrix'] = sendLevelActionBuilder(
+		'Send Input to Mono Matrix',
+		inputChannels,
+		monoMatrices,
+	)
+	actions['send_input_to_stereo_matrix'] = sendLevelActionBuilder(
+		'Send Input to Stereo Matrix',
+		inputChannels,
+		stereoMatrices,
+	)
+
+	actions['send_input_to'] = {
+		name: 'Send Input to',
+		options: [
+			{
+				type: 'dropdown',
+				label: inputChannels.name,
+				id: 'srcChannel',
+				default: 1 + inputChannels.offset,
+				choices: inputChannels.values,
+				minChoicesForSearch: 0,
+			},
+			{
+				type: 'dropdown',
+				label: mainMix.name,
+				id: 'destChannel',
+				default: 1 + mainMix.offset,
+				choices: mainMix.values,
+				minChoicesForSearch: 0,
+			},
+			{
+				type: 'dropdown',
+				label: faderChoices.name,
+				id: 'level',
+				default: 1 + faderChoices.offset,
+				choices: faderChoices.values,
+				minChoicesForSearch: 0,
+			},
+		],
+		callback: (action) => dispatchAction(self, action),
+	}
+
+	self.log('debug', Object.keys(actions).join(', '))
+	self.setActionDefinitions(actions)
+}
+
+export default UpdateActions

@@ -1,16 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.default = [
-/*
- * Place your upgrade scripts here
- * Remember that once it has been added it cannot be removed!
- */
-// function (context, props) {
-// 	return {
-// 		updatedConfig: null,
-// 		updatedActions: [],
-// 		updatedFeedbacks: [],
-// 	}
-// },
-];
+import { EmptyUpgradeScript } from '@companion-module/base';
+export const UpgradeScripts = [EmptyUpgradeScript];
+export default UpgradeScripts;
 //# sourceMappingURL=upgrades.js.map
