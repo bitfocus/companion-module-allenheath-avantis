@@ -59,7 +59,7 @@ export function UpdateActions(self: ModuleInstance): void {
 	const stereoAuxes = buildChoices('Stereo Aux', 'Stereo Aux', avantis.stereo.auxCount, 0x3f)
 	const monoMatrices = buildChoices('Mono Matrix', 'Mono Matrix', avantis.mono.matrixCount, -1)
 	const stereoMatrices = buildChoices('Stereo Matrix', 'Stereo Matrix', avantis.stereo.matrixCount, 0x3f)
-	const monoFxSends = buildChoices('Mono FX Send', 'Mono FX Send', avantis.stereo.fxSendCount, -1)
+	const monoFxSends = buildChoices('Mono FX Send', 'Mono FX Send', avantis.mono.fxSendCount, -1)
 	const stereoFxSends = buildChoices('Stereo FX Send', 'Stereo FX Send', avantis.stereo.fxSendCount, 0x0f)
 	const fxReturns = buildChoices('FX Return', 'FX Return', avantis.fxReturnCount, 0x1f)
 
@@ -236,7 +236,7 @@ export function UpdateActions(self: ModuleInstance): void {
 	})
 
 	actions['mute_input'] = muteActionBuilder('Mute Input', inputChannels)
-		actions['mute_master'] = muteActionBuilder('Mute Main Mix', mainMix)
+	actions['mute_master'] = muteActionBuilder('Mute Main Mix', mainMix)
 	actions['mute_mono_group'] = muteActionBuilder('Mute Mono Group', monoGroups)
 	actions['mute_stereo_group'] = muteActionBuilder('Mute Stereo Group', stereoGroups)
 	actions['mute_mono_aux'] = muteActionBuilder('Mute Mono Aux', monoAuxes)
@@ -258,13 +258,13 @@ export function UpdateActions(self: ModuleInstance): void {
 	actions['fader_stereo_matrix'] = faderActionBuilder('Set Stereo Matrix Master Fader to Level', stereoMatrices)
 	actions['fader_mono_fx_send'] = faderActionBuilder('Set Mono FX Send Master Fader to Level', monoFxSends)
 	actions['fader_stereo_fx_send'] = faderActionBuilder('Set Stereo FX Send Master Fader to Level', stereoFxSends)
-		actions['fader_master'] = faderActionBuilder('Set Main Mix Master Fader to Level', mainMix)
+	actions['fader_master'] = faderActionBuilder('Set Main Mix Master Fader to Level', mainMix)
 	actions['fader_fx_return'] = faderActionBuilder('Set FX Return Fader to Level', fxReturns)
 	actions['fader_DCA'] = faderActionBuilder('Set DCA Fader to Level', dca)
 
-		actions['dca_assign'] = assignActionBuilder('Assign DCA Groups for Channel', inputChannels, 'dcaGroup', dca)
+	actions['dca_assign'] = assignActionBuilder('Assign DCA Groups for Channel', inputChannels, 'dcaGroup', dca)
 	actions['mute_group_assign'] = assignActionBuilder(
-			'Assign Mute Groups for Channel',
+		'Assign Mute Groups for Channel',
 		inputChannels,
 		'muteGroup',
 		muteGroups,
@@ -316,7 +316,7 @@ export function UpdateActions(self: ModuleInstance): void {
 	}
 
 	actions['scene_recall'] = {
-			name: 'Scene Recall',
+		name: 'Scene Recall',
 		options: [
 			{
 				type: 'dropdown',
