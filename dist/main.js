@@ -4,6 +4,7 @@ import * as net from 'net';
 import UpdateActions from './actions.js';
 import { GetConfigFields } from './config.js';
 import UpdateFeedbacks from './feedbacks.js';
+import UpdatePresets from './presets.js';
 import { UpgradeScripts } from './upgrades.js';
 import UpdateVariableDefinitions from './variables.js';
 const require = createRequire(import.meta.url);
@@ -21,6 +22,7 @@ export default class ModuleInstance extends InstanceBase {
         this.updateStatus(InstanceStatus.Ok);
         this.updateActions();
         this.updateFeedbacks();
+        this.updatePresets();
         this.updateVariableDefinitions();
         this.initTcp();
         this.setupSceneSelection();
@@ -43,6 +45,9 @@ export default class ModuleInstance extends InstanceBase {
     }
     updateFeedbacks() {
         UpdateFeedbacks(this);
+    }
+    updatePresets() {
+        UpdatePresets(this);
     }
     updateVariableDefinitions() {
         UpdateVariableDefinitions(this);

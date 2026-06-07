@@ -11,6 +11,7 @@ import { GetConfigFields, type ModuleConfig } from './config.js'
 import UpdateFeedbacks from './feedbacks.js'
 import type { ActionsSchema } from './actions.js'
 import type { FeedbacksSchema } from './feedbacks.js'
+import UpdatePresets from './presets.js'
 import { UpgradeScripts } from './upgrades.js'
 import UpdateVariableDefinitions, { type VariablesSchema } from './variables.js'
 
@@ -53,6 +54,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.updateStatus(InstanceStatus.Ok)
 		this.updateActions()
 		this.updateFeedbacks()
+		this.updatePresets()
 		this.updateVariableDefinitions()
 		this.initTcp()
 		this.setupSceneSelection()
@@ -81,6 +83,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 	updateFeedbacks(): void {
 		UpdateFeedbacks(this)
+	}
+
+	updatePresets(): void {
+		UpdatePresets(this)
 	}
 
 	updateVariableDefinitions(): void {

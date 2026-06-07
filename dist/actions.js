@@ -34,7 +34,7 @@ export function UpdateActions(self) {
     const stereoAuxes = buildChoices('Stereo Aux', 'Stereo Aux', avantis.stereo.auxCount, 0x3f);
     const monoMatrices = buildChoices('Mono Matrix', 'Mono Matrix', avantis.mono.matrixCount, -1);
     const stereoMatrices = buildChoices('Stereo Matrix', 'Stereo Matrix', avantis.stereo.matrixCount, 0x3f);
-    const monoFxSends = buildChoices('Mono FX Send', 'Mono FX Send', avantis.stereo.fxSendCount, -1);
+    const monoFxSends = buildChoices('Mono FX Send', 'Mono FX Send', avantis.mono.fxSendCount, -1);
     const stereoFxSends = buildChoices('Stereo FX Send', 'Stereo FX Send', avantis.stereo.fxSendCount, 0x0f);
     const fxReturns = buildChoices('FX Return', 'FX Return', avantis.fxReturnCount, 0x1f);
     const faderChoices = {
