@@ -12,8 +12,9 @@
     "postinstall": "husky",
     "format": "prettier -w .",
     "package": "run build && companion-module-build",
-    "build": "rimraf dist && run build:main",
+    "build": "rimraf dist && yarn build:main && yarn build:assets",
     "build:main": "tsc -p tsconfig.build.json",
+    "build:assets": "cp src/avantisconfig.json src/fader.json dist/",
     "dev": "tsc -p tsconfig.build.json --watch",
     "lint:raw": "eslint",
     "lint": "run lint:raw ."
