@@ -143,8 +143,8 @@ export function GetPresetDefinitions(inputCount: number): CompanionPresetDefinit
 			'mute_input',
 			channelId,
 			'toggle',
-			AMBER,
-			BLACK,
+			GREEN,
+			WHITE,
 		)
 
 		presets[`fader_input_0db_${channel}`] = buildFaderPreset(
@@ -298,8 +298,8 @@ export function GetPresetDefinitions(inputCount: number): CompanionPresetDefinit
 			'mute_master',
 			mixId,
 			'toggle',
-			AMBER,
-			BLACK,
+			GREEN,
+			WHITE,
 		)
 
 		presets[`fader_main_0db_${mix}`] = buildFaderPreset(
@@ -347,8 +347,8 @@ export function GetPresetDefinitions(inputCount: number): CompanionPresetDefinit
 			'mute_dca',
 			dcaId,
 			'toggle',
-			AMBER,
-			BLACK,
+			GREEN,
+			WHITE,
 		)
 
 		presets[`fader_dca_0db_${dcaNumber}`] = buildFaderPreset(
@@ -396,8 +396,8 @@ export function GetPresetDefinitions(inputCount: number): CompanionPresetDefinit
 			'mute_group',
 			groupId,
 			'toggle',
-			AMBER,
-			BLACK,
+			GREEN,
+			WHITE,
 		)
 	}
 
