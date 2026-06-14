@@ -47,6 +47,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	faderLevelCache: Record<string, number> = {}
 	muteStateCache: Record<string, boolean> = {}
 	faderFadeTimers: Record<string, NodeJS.Timeout[]> = {}
+	nrpnMSB: Record<number, number> = {}
+	nrpnLSB: Record<number, number> = {}
 
 	async init(config: ModuleConfig, _isFirstInit: boolean, _secrets: undefined): Promise<void> {
 		this.config = config
@@ -133,8 +135,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	validateResponseData(data: Buffer): void {
-		this.updateMuteStateFromResponse(data)
-		this.updateFaderLevelFromResponse(data)
+		this.processIncomingMidi(data)
 
 		const values = data.toJSON().data
 		if (!values) {
@@ -144,66 +145,127 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.log('debug', `Response DATA: ${JSON.stringify(values)}`)
 	}
 
-	updateMuteStateFromResponse(data: Buffer): void {
-		let changed = false
+	processIncomingMidi(data: Buffer): void {
+		let changedMutes = false
 		const changedFeedbacks = new Set<keyof FeedbacksSchema>()
-		for (let i = 0; i <= data.length - 3; i++) {
-			const status = data[i]
-			const value = data[i + 2]
+		let runningStatus = 0
 
-			if ((status & 0xf0) === 0x90 && (value === 0x7f || value === 0x3f)) {
-				const midiCh = status & 0x0f
-				const key = `${midiCh}:${data[i + 1]}`
-				const isMuted = value === 0x7f
-				if (this.muteStateCache[key] !== isMuted) {
-					this.muteStateCache[key] = isMuted
-					changed = true
-					if (midiCh === 0) changedFeedbacks.add('mute_input')
-					else if (midiCh === 1) {
-						changedFeedbacks.add('mute_mono_group')
-						changedFeedbacks.add('mute_stereo_group')
-					} else if (midiCh === 2) {
-						changedFeedbacks.add('mute_mono_aux')
-						changedFeedbacks.add('mute_stereo_aux')
-					} else if (midiCh === 3) {
-						changedFeedbacks.add('mute_mono_matrix')
-						changedFeedbacks.add('mute_stereo_matrix')
-					} else if (midiCh === 4) {
-						changedFeedbacks.add('mute_mono_fx_send')
-						changedFeedbacks.add('mute_stereo_fx_send')
-						changedFeedbacks.add('mute_fx_return')
-						changedFeedbacks.add('mute_master')
-						changedFeedbacks.add('mute_dca')
-						changedFeedbacks.add('mute_group')
+		let i = 0
+		while (i < data.length) {
+			let status = data[i]
+			const isStatusByte = (status & 0x80) !== 0
+
+			if (isStatusByte) {
+				runningStatus = status
+				i++
+			} else {
+				status = runningStatus
+			}
+
+			if ((status & 0x80) === 0) {
+				// No valid status byte available, skip
+				i++
+				continue
+			}
+
+			const msgType = status & 0xf0
+			const midiCh = status & 0x0f
+
+			if (msgType === 0x90 || msgType === 0x80) {
+				// Note On or Note Off (3 bytes total: status, note, velocity)
+				if (i + 1 < data.length) {
+					const note = data[i]
+					const velocity = data[i + 1]
+					i += 2
+
+					const isMuted = msgType === 0x90 && velocity >= 0x40
+					const key = `${midiCh}:${note}`
+
+					if (this.muteStateCache[key] !== isMuted) {
+						this.muteStateCache[key] = isMuted
+						changedMutes = true
+						if (midiCh === 0) changedFeedbacks.add('mute_input')
+						else if (midiCh === 1) {
+							changedFeedbacks.add('mute_mono_group')
+							changedFeedbacks.add('mute_stereo_group')
+						} else if (midiCh === 2) {
+							changedFeedbacks.add('mute_mono_aux')
+							changedFeedbacks.add('mute_stereo_aux')
+						} else if (midiCh === 3) {
+							changedFeedbacks.add('mute_mono_matrix')
+							changedFeedbacks.add('mute_stereo_matrix')
+						} else if (midiCh === 4) {
+							changedFeedbacks.add('mute_mono_fx_send')
+							changedFeedbacks.add('mute_stereo_fx_send')
+							changedFeedbacks.add('mute_fx_return')
+							changedFeedbacks.add('mute_master')
+							changedFeedbacks.add('mute_dca')
+							changedFeedbacks.add('mute_group')
+						}
 					}
+				} else {
+					break
+				}
+			} else if (msgType === 0xb0) {
+				// Control Change (3 bytes total: status, controller, value)
+				if (i + 1 < data.length) {
+					const controller = data[i]
+					const val = data[i + 1]
+					i += 2
+
+					if (controller === 0x63) {
+						// NRPN MSB
+						this.nrpnMSB[midiCh] = val
+					} else if (controller === 0x62) {
+						// NRPN LSB
+						this.nrpnLSB[midiCh] = val
+					} else if (controller === 0x06) {
+						// Data Entry MSB
+						if (this.nrpnLSB[midiCh] === 0x17) {
+							const channel = this.nrpnMSB[midiCh]
+							if (channel !== undefined) {
+								this.faderLevelCache[`${midiCh}:${channel}`] = val
+							}
+						}
+					}
+				} else {
+					break
+				}
+			} else if (msgType === 0xa0 || msgType === 0xe0) {
+				if (i + 1 < data.length) {
+					i += 2
+				} else {
+					break
+				}
+			} else if (msgType === 0xc0 || msgType === 0xd0) {
+				if (i < data.length) {
+					i += 1
+				} else {
+					break
+				}
+			} else if (status === 0xf0) {
+				// Sysex
+				while (i < data.length && data[i] !== 0xf7) {
+					i++
+				}
+				if (i < data.length) {
+					i++
+				}
+				runningStatus = 0
+			} else {
+				if (isStatusByte) {
+					// Already advanced i
+				} else {
+					i++
 				}
 			}
 		}
-		if (changed && changedFeedbacks.size > 0) {
+
+		if (changedMutes && changedFeedbacks.size > 0) {
 			const arr = Array.from(changedFeedbacks)
 			const first = arr[0]
 			if (first) {
 				this.checkFeedbacks(first, ...arr.slice(1))
-			}
-		}
-	}
-
-	updateFaderLevelFromResponse(data: Buffer): void {
-		for (let i = 0; i <= data.length - 9; i++) {
-			if (
-				(data[i] & 0xf0) === 0xb0 &&
-				data[i + 1] === 0x63 &&
-				(data[i + 3] & 0xf0) === 0xb0 &&
-				data[i + 4] === 0x62 &&
-				data[i + 5] === 0x17 &&
-				(data[i + 6] & 0xf0) === 0xb0 &&
-				data[i + 7] === 0x06
-			) {
-				const midiOffset = data[i] & 0x0f
-				const channel = data[i + 2]
-				const level = data[i + 8]
-				this.faderLevelCache[`${midiOffset}:${channel}`] = level
-				i += 8
 			}
 		}
 	}
