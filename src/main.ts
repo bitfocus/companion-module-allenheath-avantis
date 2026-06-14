@@ -49,6 +49,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	faderFadeTimers: Record<string, NodeJS.Timeout[]> = {}
 	nrpnMSB: Record<number, number> = {}
 	nrpnLSB: Record<number, number> = {}
+	reconnectTimer?: NodeJS.Timeout
 
 	async init(config: ModuleConfig, _isFirstInit: boolean, _secrets: undefined): Promise<void> {
 		this.config = config
@@ -64,6 +65,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 	async destroy(): Promise<void> {
 		this.clearFaderFadeTimers()
+		this.clearReconnectTimer()
 
 		if (this.tcpSocket) {
 			this.tcpSocket.destroy()
@@ -101,6 +103,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 	initTcp(): void {
 		this.clearFaderFadeTimers()
+		this.clearReconnectTimer()
 
 		if (this.tcpSocket) {
 			this.tcpSocket.destroy()
@@ -117,21 +120,39 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			this.tcpSocket.on('error', (err: { message: string }) => {
 				this.log('error', `TCP error: ${err.message}`)
 				this.updateStatus(InstanceStatus.ConnectionFailure, err.message)
+				this.triggerReconnect()
 			})
 
 			this.tcpSocket.on('connect', () => {
 				this.log('debug', `TCP Connected to ${this.config.host}`)
 				this.updateStatus(InstanceStatus.Ok)
+				this.clearReconnectTimer()
 			})
 
 			this.tcpSocket.on('close', () => {
 				this.updateStatus(InstanceStatus.Disconnected)
+				this.triggerReconnect()
 			})
 
 			this.tcpSocket.on('data', (data: Buffer) => {
 				this.validateResponseData(data)
 			})
 		}
+	}
+
+	clearReconnectTimer(): void {
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer)
+			delete this.reconnectTimer
+		}
+	}
+
+	triggerReconnect(): void {
+		this.clearReconnectTimer()
+		this.reconnectTimer = setTimeout(() => {
+			this.log('debug', 'Attempting to reconnect to Avantis mixer...')
+			this.initTcp()
+		}, 5000)
 	}
 
 	validateResponseData(data: Buffer): void {

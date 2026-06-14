@@ -20,6 +20,7 @@ export default class ModuleInstance extends InstanceBase {
     faderFadeTimers = {};
     nrpnMSB = {};
     nrpnLSB = {};
+    reconnectTimer;
     async init(config, _isFirstInit, _secrets) {
         this.config = config;
         this.updateStatus(InstanceStatus.Connecting);
@@ -32,6 +33,7 @@ export default class ModuleInstance extends InstanceBase {
     }
     async destroy() {
         this.clearFaderFadeTimers();
+        this.clearReconnectTimer();
         if (this.tcpSocket) {
             this.tcpSocket.destroy();
         }
@@ -60,6 +62,7 @@ export default class ModuleInstance extends InstanceBase {
     }
     initTcp() {
         this.clearFaderFadeTimers();
+        this.clearReconnectTimer();
         if (this.tcpSocket) {
             this.tcpSocket.destroy();
             delete this.tcpSocket;
@@ -73,18 +76,34 @@ export default class ModuleInstance extends InstanceBase {
             this.tcpSocket.on('error', (err) => {
                 this.log('error', `TCP error: ${err.message}`);
                 this.updateStatus(InstanceStatus.ConnectionFailure, err.message);
+                this.triggerReconnect();
             });
             this.tcpSocket.on('connect', () => {
                 this.log('debug', `TCP Connected to ${this.config.host}`);
                 this.updateStatus(InstanceStatus.Ok);
+                this.clearReconnectTimer();
             });
             this.tcpSocket.on('close', () => {
                 this.updateStatus(InstanceStatus.Disconnected);
+                this.triggerReconnect();
             });
             this.tcpSocket.on('data', (data) => {
                 this.validateResponseData(data);
             });
         }
+    }
+    clearReconnectTimer() {
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            delete this.reconnectTimer;
+        }
+    }
+    triggerReconnect() {
+        this.clearReconnectTimer();
+        this.reconnectTimer = setTimeout(() => {
+            this.log('debug', 'Attempting to reconnect to Avantis mixer...');
+            this.initTcp();
+        }, 5000);
     }
     validateResponseData(data) {
         this.processIncomingMidi(data);
