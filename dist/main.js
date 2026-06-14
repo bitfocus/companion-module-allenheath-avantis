@@ -2,6 +2,7 @@ import { InstanceBase, InstanceStatus, } from '@companion-module/base';
 import * as net from 'net';
 import UpdateActions from './actions.js';
 import avantisConfig from './avantisconfig.json' with { type: 'json' };
+import fader from './fader.json' with { type: 'json' };
 import { GetConfigFields } from './config.js';
 import UpdateFeedbacks from './feedbacks.js';
 import UpdatePresets from './presets.js';
@@ -10,6 +11,20 @@ import UpdateVariableDefinitions from './variables.js';
 const PORT = 51325;
 const SysExHeader = [0xf0, 0x00, 0x00, 0x1a, 0x50, 0x10, 0x01, 0x00];
 const configFields = GetConfigFields();
+const faderLevelToDbMap = new Array(128).fill('-inf');
+function initFaderLevelToDbMap() {
+    const faderLevels = fader.level.map(([db, hex]) => ({ db, val: parseInt(hex, 16) }));
+    faderLevels.sort((a, b) => a.val - b.val);
+    let currentIdx = 0;
+    for (let val = 0; val <= 127; val++) {
+        while (currentIdx < faderLevels.length - 1 &&
+            Math.abs(faderLevels[currentIdx + 1].val - val) <= Math.abs(faderLevels[currentIdx].val - val)) {
+            currentIdx++;
+        }
+        faderLevelToDbMap[val] = faderLevels[currentIdx].db;
+    }
+}
+initFaderLevelToDbMap();
 export { UpgradeScripts };
 export default class ModuleInstance extends InstanceBase {
     config;
@@ -208,6 +223,7 @@ export default class ModuleInstance extends InstanceBase {
                             const channel = this.nrpnMSB[midiCh];
                             if (channel !== undefined) {
                                 this.faderLevelCache[`${midiCh}:${channel}`] = val;
+                                this.updateFaderLevelVariable(midiCh, channel, val);
                             }
                         }
                     }
@@ -257,6 +273,74 @@ export default class ModuleInstance extends InstanceBase {
             if (first) {
                 this.checkFeedbacks(first, ...arr.slice(1));
             }
+        }
+    }
+    updateFaderLevelVariable(midiOffset, channel, level) {
+        const midiBase = (this.config.midiBase ?? 1) - 1;
+        const relOffset = midiOffset - midiBase;
+        let prefix = '';
+        let index = 1;
+        if (relOffset === 0) {
+            prefix = 'fader_input';
+            index = channel + 1;
+        }
+        else if (relOffset === 1) {
+            if (channel >= 0x3f) {
+                prefix = 'fader_stereo_group';
+                index = channel - 0x3f + 1;
+            }
+            else {
+                prefix = 'fader_mono_group';
+                index = channel + 1;
+            }
+        }
+        else if (relOffset === 2) {
+            if (channel >= 0x3f) {
+                prefix = 'fader_stereo_aux';
+                index = channel - 0x3f + 1;
+            }
+            else {
+                prefix = 'fader_mono_aux';
+                index = channel + 1;
+            }
+        }
+        else if (relOffset === 3) {
+            if (channel >= 0x3f) {
+                prefix = 'fader_stereo_matrix';
+                index = channel - 0x3f + 1;
+            }
+            else {
+                prefix = 'fader_mono_matrix';
+                index = channel + 1;
+            }
+        }
+        else if (relOffset === 4) {
+            if (channel >= 0x35 && channel <= 0x44) {
+                prefix = 'fader_dca';
+                index = channel - 0x35 + 1;
+            }
+            else if (channel >= 0x2f && channel <= 0x31) {
+                prefix = 'fader_main';
+                index = channel - 0x2f + 1;
+            }
+            else if (channel >= 0x0f && channel <= 0x1a) {
+                prefix = 'fader_stereo_fx_send';
+                index = channel - 0x0f + 1;
+            }
+            else if (channel >= 0x1f && channel <= 0x2a) {
+                prefix = 'fader_fx_return';
+                index = channel - 0x1f + 1;
+            }
+            else if (channel < 0x0f) {
+                prefix = 'fader_mono_fx_send';
+                index = channel + 1;
+            }
+        }
+        if (prefix) {
+            const dbStr = faderLevelToDbMap[level] ?? '-inf';
+            this.setVariableValues({
+                [`${prefix}_${index}`]: `${dbStr} dB`,
+            });
         }
     }
     setupSceneSelection() {
@@ -438,6 +522,7 @@ export default class ModuleInstance extends InstanceBase {
         const faderLevel = parseInt(opt.level);
         const channel = Number(opt.channel);
         this.faderLevelCache[`${midiOffset}:${channel}`] = faderLevel;
+        this.updateFaderLevelVariable(midiOffset, channel, faderLevel);
         return [
             Buffer.from([
                 0xb0 + midiOffset,
