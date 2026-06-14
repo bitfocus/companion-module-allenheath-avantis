@@ -116,42 +116,54 @@ export default class ModuleInstance extends InstanceBase {
             }
             const msgType = status & 0xf0;
             const midiCh = status & 0x0f;
-            if (msgType === 0x90 || msgType === 0x80) {
-                // Note On or Note Off (3 bytes total: status, note, velocity)
+            if (msgType === 0x90) {
+                // Note On (3 bytes total: status, note, velocity)
                 if (i + 1 < data.length) {
                     const note = data[i];
                     const velocity = data[i + 1];
                     i += 2;
-                    const isMuted = msgType === 0x90 && velocity >= 0x40;
-                    const key = `${midiCh}:${note}`;
-                    if (this.muteStateCache[key] !== isMuted) {
-                        this.muteStateCache[key] = isMuted;
-                        changedMutes = true;
-                        const midiBase = (this.config.midiBase ?? 1) - 1;
-                        const relCh = midiCh - midiBase;
-                        if (relCh === 0)
-                            changedFeedbacks.add('mute_input');
-                        else if (relCh === 1) {
-                            changedFeedbacks.add('mute_mono_group');
-                            changedFeedbacks.add('mute_stereo_group');
-                        }
-                        else if (relCh === 2) {
-                            changedFeedbacks.add('mute_mono_aux');
-                            changedFeedbacks.add('mute_stereo_aux');
-                        }
-                        else if (relCh === 3) {
-                            changedFeedbacks.add('mute_mono_matrix');
-                            changedFeedbacks.add('mute_stereo_matrix');
-                        }
-                        else if (relCh === 4) {
-                            changedFeedbacks.add('mute_mono_fx_send');
-                            changedFeedbacks.add('mute_stereo_fx_send');
-                            changedFeedbacks.add('mute_fx_return');
-                            changedFeedbacks.add('mute_master');
-                            changedFeedbacks.add('mute_dca');
-                            changedFeedbacks.add('mute_group');
+                    // Ignore momentary key release (velocity 0x00)
+                    if (velocity !== 0x00) {
+                        const isMuted = velocity >= 0x40;
+                        const key = `${midiCh}:${note}`;
+                        if (this.muteStateCache[key] !== isMuted) {
+                            this.muteStateCache[key] = isMuted;
+                            changedMutes = true;
+                            const midiBase = (this.config.midiBase ?? 1) - 1;
+                            const relCh = midiCh - midiBase;
+                            if (relCh === 0)
+                                changedFeedbacks.add('mute_input');
+                            else if (relCh === 1) {
+                                changedFeedbacks.add('mute_mono_group');
+                                changedFeedbacks.add('mute_stereo_group');
+                            }
+                            else if (relCh === 2) {
+                                changedFeedbacks.add('mute_mono_aux');
+                                changedFeedbacks.add('mute_stereo_aux');
+                            }
+                            else if (relCh === 3) {
+                                changedFeedbacks.add('mute_mono_matrix');
+                                changedFeedbacks.add('mute_stereo_matrix');
+                            }
+                            else if (relCh === 4) {
+                                changedFeedbacks.add('mute_mono_fx_send');
+                                changedFeedbacks.add('mute_stereo_fx_send');
+                                changedFeedbacks.add('mute_fx_return');
+                                changedFeedbacks.add('mute_master');
+                                changedFeedbacks.add('mute_dca');
+                                changedFeedbacks.add('mute_group');
+                            }
                         }
                     }
+                }
+                else {
+                    break;
+                }
+            }
+            else if (msgType === 0x80) {
+                // Note Off (3 bytes total: status, note, velocity) - ignore for mute state
+                if (i + 1 < data.length) {
+                    i += 2;
                 }
                 else {
                     break;
