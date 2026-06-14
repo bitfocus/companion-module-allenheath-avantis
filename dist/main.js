@@ -15,9 +15,12 @@ export default class ModuleInstance extends InstanceBase {
     config;
     tcpSocket;
     scenes = [];
+    faderLevelCache = {};
+    muteStateCache = {};
+    faderFadeTimers = {};
     async init(config, _isFirstInit, _secrets) {
         this.config = config;
-        this.updateStatus(InstanceStatus.Ok);
+        this.updateStatus(InstanceStatus.Connecting);
         this.updateActions();
         this.updateFeedbacks();
         this.updatePresets();
@@ -26,6 +29,7 @@ export default class ModuleInstance extends InstanceBase {
         this.setupSceneSelection();
     }
     async destroy() {
+        this.clearFaderFadeTimers();
         if (this.tcpSocket) {
             this.tcpSocket.destroy();
         }
@@ -33,6 +37,8 @@ export default class ModuleInstance extends InstanceBase {
     }
     async configUpdated(config, _secrets) {
         this.config = config;
+        this.updateActions();
+        this.updatePresets();
         this.initTcp();
     }
     getConfigFields() {
@@ -51,23 +57,27 @@ export default class ModuleInstance extends InstanceBase {
         UpdateVariableDefinitions(this);
     }
     initTcp() {
+        this.clearFaderFadeTimers();
         if (this.tcpSocket) {
             this.tcpSocket.destroy();
             delete this.tcpSocket;
         }
         if (this.config.host) {
+            this.updateStatus(InstanceStatus.Connecting);
             this.tcpSocket = new net.Socket().connect({
                 host: this.config.host,
                 port: PORT,
             });
-            this.tcpSocket.on('status_change', (status, message) => {
-                this.updateStatus(status, message);
-            });
             this.tcpSocket.on('error', (err) => {
                 this.log('error', `TCP error: ${err.message}`);
+                this.updateStatus(InstanceStatus.ConnectionFailure, err.message);
             });
             this.tcpSocket.on('connect', () => {
                 this.log('debug', `TCP Connected to ${this.config.host}`);
+                this.updateStatus(InstanceStatus.Ok);
+            });
+            this.tcpSocket.on('close', () => {
+                this.updateStatus(InstanceStatus.Disconnected);
             });
             this.tcpSocket.on('data', (data) => {
                 this.validateResponseData(data);
@@ -75,11 +85,39 @@ export default class ModuleInstance extends InstanceBase {
         }
     }
     validateResponseData(data) {
+        this.updateMuteStateFromResponse(data);
+        this.updateFaderLevelFromResponse(data);
         const values = data.toJSON().data;
         if (!values) {
             return;
         }
         this.log('debug', `Response DATA: ${JSON.stringify(values)}`);
+    }
+    updateMuteStateFromResponse(data) {
+        for (let i = 0; i <= data.length - 3; i++) {
+            const status = data[i];
+            const value = data[i + 2];
+            if ((status & 0xf0) === 0x90 && (value === 0x7f || value === 0x3f)) {
+                this.muteStateCache[`${status & 0x0f}:${data[i + 1]}`] = value === 0x7f;
+            }
+        }
+    }
+    updateFaderLevelFromResponse(data) {
+        for (let i = 0; i <= data.length - 9; i++) {
+            if ((data[i] & 0xf0) === 0xb0 &&
+                data[i + 1] === 0x63 &&
+                (data[i + 3] & 0xf0) === 0xb0 &&
+                data[i + 4] === 0x62 &&
+                data[i + 5] === 0x17 &&
+                (data[i + 6] & 0xf0) === 0xb0 &&
+                data[i + 7] === 0x06) {
+                const midiOffset = data[i] & 0x0f;
+                const channel = data[i + 2];
+                const level = data[i + 8];
+                this.faderLevelCache[`${midiOffset}:${channel}`] = level;
+                i += 8;
+            }
+        }
     }
     setupSceneSelection() {
         const getSceneBank = (sceneNumber) => {
@@ -115,7 +153,7 @@ export default class ModuleInstance extends InstanceBase {
                 bufferCommands = this.buildMuteCommand(opt, midiBase);
                 break;
             case 'fader_input':
-                bufferCommands = this.buildFaderCommand(opt, midiBase);
+                bufferCommands = this.handleFaderAction(opt, midiBase);
                 break;
             case 'mute_mono_group':
             case 'mute_stereo_group':
@@ -123,7 +161,7 @@ export default class ModuleInstance extends InstanceBase {
                 break;
             case 'fader_mono_group':
             case 'fader_stereo_group':
-                bufferCommands = this.buildFaderCommand(opt, midiBase + 1);
+                bufferCommands = this.handleFaderAction(opt, midiBase + 1);
                 break;
             case 'mute_mono_aux':
             case 'mute_stereo_aux':
@@ -131,7 +169,7 @@ export default class ModuleInstance extends InstanceBase {
                 break;
             case 'fader_mono_aux':
             case 'fader_stereo_aux':
-                bufferCommands = this.buildFaderCommand(opt, midiBase + 2);
+                bufferCommands = this.handleFaderAction(opt, midiBase + 2);
                 break;
             case 'mute_mono_matrix':
             case 'mute_stereo_matrix':
@@ -139,7 +177,7 @@ export default class ModuleInstance extends InstanceBase {
                 break;
             case 'fader_mono_matrix':
             case 'fader_stereo_matrix':
-                bufferCommands = this.buildFaderCommand(opt, midiBase + 3);
+                bufferCommands = this.handleFaderAction(opt, midiBase + 3);
                 break;
             case 'mute_mono_fx_send':
             case 'mute_stereo_fx_send':
@@ -154,7 +192,7 @@ export default class ModuleInstance extends InstanceBase {
             case 'fader_stereo_fx_send':
             case 'fader_fx_return':
             case 'fader_master':
-                bufferCommands = this.buildFaderCommand(opt, midiBase + 4);
+                bufferCommands = this.handleFaderAction(opt, midiBase + 4);
                 break;
             case 'dca_assign':
                 bufferCommands = this.buildAssignCommands(opt, midiBase + 4, true);
@@ -201,15 +239,51 @@ export default class ModuleInstance extends InstanceBase {
         }
     }
     buildMuteCommand(opt, midiOffset) {
-        return [Buffer.from([0x90 + midiOffset, opt.channel, opt.mute ? 0x7f : 0x3f, 0x90 + midiOffset, opt.channel, 0x00])];
+        const channel = Number(opt.channel);
+        const key = `${midiOffset}:${channel}`;
+        const muteState = opt.mute === 'toggle'
+            ? !this.muteStateCache[key]
+            : opt.mute === true || opt.mute === 'true' || opt.mute === 'mute';
+        this.muteStateCache[key] = muteState;
+        return [Buffer.from([0x90 + midiOffset, channel, muteState ? 0x7f : 0x3f, 0x90 + midiOffset, channel, 0x00])];
+    }
+    handleFaderAction(opt, midiOffset) {
+        const fadeDuration = Number(opt.fadeDuration ?? 0);
+        if (Number.isFinite(fadeDuration) && fadeDuration > 0) {
+            this.fadeFaderCommand(opt, midiOffset, fadeDuration);
+            return [];
+        }
+        return this.buildFaderCommand(opt, midiOffset);
+    }
+    fadeFaderCommand(opt, midiOffset, fadeDuration) {
+        const targetLevel = parseInt(opt.level);
+        const channel = Number(opt.channel);
+        const key = `${midiOffset}:${channel}`;
+        const startLevel = this.faderLevelCache[key];
+        this.clearFaderFadeTimers(key);
+        if (startLevel === undefined || startLevel === targetLevel) {
+            this.writeCommand(this.buildFaderCommand(opt, midiOffset)[0]);
+            return;
+        }
+        const stepCount = Math.max(2, Math.min(40, Math.round(fadeDuration * 10)));
+        const values = Array.from(new Set(Array.from({ length: stepCount }, (_, index) => Math.round(startLevel + ((targetLevel - startLevel) * (index + 1)) / stepCount))));
+        const intervalMs = Math.max(50, Math.round((fadeDuration * 1000) / values.length));
+        this.faderFadeTimers[key] = values.map((level, index) => setTimeout(() => {
+            this.writeCommand(this.buildFaderCommand({ level: String(level), channel: opt.channel }, midiOffset)[0]);
+            if (index === values.length - 1) {
+                delete this.faderFadeTimers[key];
+            }
+        }, intervalMs * (index + 1)));
     }
     buildFaderCommand(opt, midiOffset) {
         const faderLevel = parseInt(opt.level);
+        const channel = Number(opt.channel);
+        this.faderLevelCache[`${midiOffset}:${channel}`] = faderLevel;
         return [
             Buffer.from([
                 0xb0 + midiOffset,
                 0x63,
-                opt.channel,
+                channel,
                 0xb0 + midiOffset,
                 0x62,
                 0x17,
@@ -283,18 +357,17 @@ export default class ModuleInstance extends InstanceBase {
         return [Buffer.from([...SysExHeader, 0x00 + midiOffset, 0x06, parseInt(opt.channel), parseInt(opt.color), 0xf7])];
     }
     buildSendLevelCommand(opt, baseMidi, srcMidiChnl, destMidiChnl) {
-        return [
-            Buffer.from([
-                ...SysExHeader,
-                0x00 + baseMidi + srcMidiChnl,
-                0x0d,
-                parseInt(String(opt.srcChannel)),
-                baseMidi + destMidiChnl,
-                opt.destChannel,
-                parseInt(opt.level),
-                0xf7,
-            ]),
-        ];
+        const sourceChannels = Array.isArray(opt.srcChannel) ? opt.srcChannel : [opt.srcChannel];
+        return sourceChannels.map((sourceChannel) => Buffer.from([
+            ...SysExHeader,
+            0x00 + baseMidi + srcMidiChnl,
+            0x0d,
+            parseInt(String(sourceChannel)),
+            baseMidi + destMidiChnl,
+            opt.destChannel,
+            parseInt(opt.level),
+            0xf7,
+        ]));
     }
     buildSendLevelNumberCommand(opt, baseMidi, srcMidiChnl, destMidiChnl) {
         const levelMap = [
@@ -336,6 +409,20 @@ export default class ModuleInstance extends InstanceBase {
     }
     dumpData(opt, midiBase, bufferCommands) {
         this.log('debug', `dumpData: ${JSON.stringify(opt)} ${midiBase} ${bufferCommands.length}`);
+    }
+    writeCommand(command) {
+        if (this.tcpSocket?.writable) {
+            this.tcpSocket.write(command);
+        }
+    }
+    clearFaderFadeTimers(key) {
+        const keys = key ? [key] : Object.keys(this.faderFadeTimers);
+        for (const timerKey of keys) {
+            for (const timer of this.faderFadeTimers[timerKey] ?? []) {
+                clearTimeout(timer);
+            }
+            delete this.faderFadeTimers[timerKey];
+        }
     }
 }
 //# sourceMappingURL=main.js.map
