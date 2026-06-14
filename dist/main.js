@@ -94,11 +94,48 @@ export default class ModuleInstance extends InstanceBase {
         this.log('debug', `Response DATA: ${JSON.stringify(values)}`);
     }
     updateMuteStateFromResponse(data) {
+        let changed = false;
+        const changedFeedbacks = new Set();
         for (let i = 0; i <= data.length - 3; i++) {
             const status = data[i];
             const value = data[i + 2];
             if ((status & 0xf0) === 0x90 && (value === 0x7f || value === 0x3f)) {
-                this.muteStateCache[`${status & 0x0f}:${data[i + 1]}`] = value === 0x7f;
+                const midiCh = status & 0x0f;
+                const key = `${midiCh}:${data[i + 1]}`;
+                const isMuted = value === 0x7f;
+                if (this.muteStateCache[key] !== isMuted) {
+                    this.muteStateCache[key] = isMuted;
+                    changed = true;
+                    if (midiCh === 0)
+                        changedFeedbacks.add('mute_input');
+                    else if (midiCh === 1) {
+                        changedFeedbacks.add('mute_mono_group');
+                        changedFeedbacks.add('mute_stereo_group');
+                    }
+                    else if (midiCh === 2) {
+                        changedFeedbacks.add('mute_mono_aux');
+                        changedFeedbacks.add('mute_stereo_aux');
+                    }
+                    else if (midiCh === 3) {
+                        changedFeedbacks.add('mute_mono_matrix');
+                        changedFeedbacks.add('mute_stereo_matrix');
+                    }
+                    else if (midiCh === 4) {
+                        changedFeedbacks.add('mute_mono_fx_send');
+                        changedFeedbacks.add('mute_stereo_fx_send');
+                        changedFeedbacks.add('mute_fx_return');
+                        changedFeedbacks.add('mute_master');
+                        changedFeedbacks.add('mute_dca');
+                        changedFeedbacks.add('mute_group');
+                    }
+                }
+            }
+        }
+        if (changed && changedFeedbacks.size > 0) {
+            const arr = Array.from(changedFeedbacks);
+            const first = arr[0];
+            if (first) {
+                this.checkFeedbacks(first, ...arr.slice(1));
             }
         }
     }
@@ -244,7 +281,24 @@ export default class ModuleInstance extends InstanceBase {
         const muteState = opt.mute === 'toggle'
             ? !this.muteStateCache[key]
             : opt.mute === true || opt.mute === 'true' || opt.mute === 'mute';
-        this.muteStateCache[key] = muteState;
+        if (this.muteStateCache[key] !== muteState) {
+            this.muteStateCache[key] = muteState;
+            if (midiOffset === 0) {
+                this.checkFeedbacks('mute_input');
+            }
+            else if (midiOffset === 1) {
+                this.checkFeedbacks('mute_mono_group', 'mute_stereo_group');
+            }
+            else if (midiOffset === 2) {
+                this.checkFeedbacks('mute_mono_aux', 'mute_stereo_aux');
+            }
+            else if (midiOffset === 3) {
+                this.checkFeedbacks('mute_mono_matrix', 'mute_stereo_matrix');
+            }
+            else if (midiOffset === 4) {
+                this.checkFeedbacks('mute_mono_fx_send', 'mute_stereo_fx_send', 'mute_fx_return', 'mute_master', 'mute_dca', 'mute_group');
+            }
+        }
         return [Buffer.from([0x90 + midiOffset, channel, muteState ? 0x7f : 0x3f, 0x90 + midiOffset, channel, 0x00])];
     }
     handleFaderAction(opt, midiOffset) {

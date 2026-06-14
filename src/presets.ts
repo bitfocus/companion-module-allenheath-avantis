@@ -52,7 +52,18 @@ function buildMutePreset(
 				up: [],
 			},
 		],
-		feedbacks: [],
+		feedbacks: [
+			{
+				feedbackId: actionId,
+				options: {
+					channel,
+				},
+				style: {
+					bgcolor: RED,
+					color: WHITE,
+				},
+			},
+		],
 		keywords: [id, 'mute'],
 	}
 }
