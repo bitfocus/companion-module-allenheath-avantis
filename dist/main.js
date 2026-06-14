@@ -127,21 +127,23 @@ export default class ModuleInstance extends InstanceBase {
                     if (this.muteStateCache[key] !== isMuted) {
                         this.muteStateCache[key] = isMuted;
                         changedMutes = true;
-                        if (midiCh === 0)
+                        const midiBase = (this.config.midiBase ?? 1) - 1;
+                        const relCh = midiCh - midiBase;
+                        if (relCh === 0)
                             changedFeedbacks.add('mute_input');
-                        else if (midiCh === 1) {
+                        else if (relCh === 1) {
                             changedFeedbacks.add('mute_mono_group');
                             changedFeedbacks.add('mute_stereo_group');
                         }
-                        else if (midiCh === 2) {
+                        else if (relCh === 2) {
                             changedFeedbacks.add('mute_mono_aux');
                             changedFeedbacks.add('mute_stereo_aux');
                         }
-                        else if (midiCh === 3) {
+                        else if (relCh === 3) {
                             changedFeedbacks.add('mute_mono_matrix');
                             changedFeedbacks.add('mute_stereo_matrix');
                         }
-                        else if (midiCh === 4) {
+                        else if (relCh === 4) {
                             changedFeedbacks.add('mute_mono_fx_send');
                             changedFeedbacks.add('mute_stereo_fx_send');
                             changedFeedbacks.add('mute_fx_return');
@@ -353,19 +355,21 @@ export default class ModuleInstance extends InstanceBase {
             : opt.mute === true || opt.mute === 'true' || opt.mute === 'mute';
         if (this.muteStateCache[key] !== muteState) {
             this.muteStateCache[key] = muteState;
-            if (midiOffset === 0) {
+            const midiBase = (this.config.midiBase ?? 1) - 1;
+            const relOffset = midiOffset - midiBase;
+            if (relOffset === 0) {
                 this.checkFeedbacks('mute_input');
             }
-            else if (midiOffset === 1) {
+            else if (relOffset === 1) {
                 this.checkFeedbacks('mute_mono_group', 'mute_stereo_group');
             }
-            else if (midiOffset === 2) {
+            else if (relOffset === 2) {
                 this.checkFeedbacks('mute_mono_aux', 'mute_stereo_aux');
             }
-            else if (midiOffset === 3) {
+            else if (relOffset === 3) {
                 this.checkFeedbacks('mute_mono_matrix', 'mute_stereo_matrix');
             }
-            else if (midiOffset === 4) {
+            else if (relOffset === 4) {
                 this.checkFeedbacks('mute_mono_fx_send', 'mute_stereo_fx_send', 'mute_fx_return', 'mute_master', 'mute_dca', 'mute_group');
             }
         }
