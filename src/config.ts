@@ -4,6 +4,7 @@ export interface ModuleConfig {
 	[key: string]: JsonValue
 	host: string | null
 	midiBase: number
+	inputCount: number
 }
 
 export function GetConfigFields(): SomeCompanionConfigField[] {
@@ -32,6 +33,18 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 			default: 1,
 			min: 1,
 			max: 12,
+		},
+		{
+			type: 'dropdown',
+			label: 'Input Channel Count',
+			id: 'inputCount',
+			tooltip: 'Avantis V2.0 expands dPack systems from 64 to 96 input channels.',
+			width: 6,
+			default: 64,
+			choices: [
+				{ id: 64, label: '64 Inputs' },
+				{ id: 96, label: '96 Inputs (V2.0 dPack)' },
+			],
 		},
 	]
 }

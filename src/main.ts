@@ -7,6 +7,7 @@ import {
 import * as net from 'net'
 import UpdateActions from './actions.js'
 import avantisConfig from './avantisconfig.json' with { type: 'json' }
+import fader from './fader.json' with { type: 'json' }
 import { GetConfigFields, type ModuleConfig } from './config.js'
 import UpdateFeedbacks from './feedbacks.js'
 import type { ActionsSchema } from './actions.js'
@@ -18,6 +19,26 @@ import UpdateVariableDefinitions, { type VariablesSchema } from './variables.js'
 const PORT = 51325
 const SysExHeader = [0xf0, 0x00, 0x00, 0x1a, 0x50, 0x10, 0x01, 0x00]
 const configFields = GetConfigFields()
+
+const faderLevelToDbMap: string[] = new Array(128).fill('-inf')
+
+function initFaderLevelToDbMap(): void {
+	const faderLevels = fader.level.map(([db, hex]) => ({ db, val: parseInt(hex, 16) }))
+	faderLevels.sort((a, b) => a.val - b.val)
+
+	let currentIdx = 0
+	for (let val = 0; val <= 127; val++) {
+		while (
+			currentIdx < faderLevels.length - 1 &&
+			Math.abs(faderLevels[currentIdx + 1].val - val) <= Math.abs(faderLevels[currentIdx].val - val)
+		) {
+			currentIdx++
+		}
+		faderLevelToDbMap[val] = faderLevels[currentIdx].db
+	}
+}
+
+initFaderLevelToDbMap()
 
 type SceneDefinition = {
 	sceneNumber: number
@@ -44,11 +65,17 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	config!: ModuleConfig
 	tcpSocket?: net.Socket
 	scenes: SceneDefinition[] = []
+	faderLevelCache: Record<string, number> = {}
+	muteStateCache: Record<string, boolean> = {}
+	faderFadeTimers: Record<string, NodeJS.Timeout[]> = {}
+	nrpnMSB: Record<number, number> = {}
+	nrpnLSB: Record<number, number> = {}
+	reconnectTimer?: NodeJS.Timeout
 
 	async init(config: ModuleConfig, _isFirstInit: boolean, _secrets: undefined): Promise<void> {
 		this.config = config
 
-		this.updateStatus(InstanceStatus.Ok)
+		this.updateStatus(InstanceStatus.Connecting)
 		this.updateActions()
 		this.updateFeedbacks()
 		this.updatePresets()
@@ -58,6 +85,9 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	async destroy(): Promise<void> {
+		this.clearFaderFadeTimers()
+		this.clearReconnectTimer()
+
 		if (this.tcpSocket) {
 			this.tcpSocket.destroy()
 		}
@@ -67,6 +97,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 	async configUpdated(config: ModuleConfig, _secrets: undefined): Promise<void> {
 		this.config = config
+		this.updateActions()
+		this.updatePresets()
 		this.initTcp()
 	}
 
@@ -91,27 +123,36 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	initTcp(): void {
+		this.clearFaderFadeTimers()
+		this.clearReconnectTimer()
+
 		if (this.tcpSocket) {
 			this.tcpSocket.destroy()
 			delete this.tcpSocket
 		}
 
 		if (this.config.host) {
+			this.updateStatus(InstanceStatus.Connecting)
 			this.tcpSocket = new net.Socket().connect({
 				host: this.config.host,
 				port: PORT,
 			})
 
-			this.tcpSocket.on('status_change', (status: any, message: any) => {
-				this.updateStatus(status, message)
-			})
-
 			this.tcpSocket.on('error', (err: { message: string }) => {
 				this.log('error', `TCP error: ${err.message}`)
+				this.updateStatus(InstanceStatus.ConnectionFailure, err.message)
+				this.triggerReconnect()
 			})
 
 			this.tcpSocket.on('connect', () => {
 				this.log('debug', `TCP Connected to ${this.config.host}`)
+				this.updateStatus(InstanceStatus.Ok)
+				this.clearReconnectTimer()
+			})
+
+			this.tcpSocket.on('close', () => {
+				this.updateStatus(InstanceStatus.Disconnected)
+				this.triggerReconnect()
 			})
 
 			this.tcpSocket.on('data', (data: Buffer) => {
@@ -120,13 +161,229 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		}
 	}
 
+	clearReconnectTimer(): void {
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer)
+			delete this.reconnectTimer
+		}
+	}
+
+	triggerReconnect(): void {
+		this.clearReconnectTimer()
+		this.reconnectTimer = setTimeout(() => {
+			this.log('debug', 'Attempting to reconnect to Avantis mixer...')
+			this.initTcp()
+		}, 5000)
+	}
+
 	validateResponseData(data: Buffer): void {
+		this.processIncomingMidi(data)
+
 		const values = data.toJSON().data
 		if (!values) {
 			return
 		}
 
 		this.log('debug', `Response DATA: ${JSON.stringify(values)}`)
+	}
+
+	processIncomingMidi(data: Buffer): void {
+		let changedMutes = false
+		const changedFeedbacks = new Set<keyof FeedbacksSchema>()
+		let runningStatus = 0
+
+		let i = 0
+		while (i < data.length) {
+			let status = data[i]
+			const isStatusByte = (status & 0x80) !== 0
+
+			if (isStatusByte) {
+				runningStatus = status
+				i++
+			} else {
+				status = runningStatus
+			}
+
+			if ((status & 0x80) === 0) {
+				// No valid status byte available, skip
+				i++
+				continue
+			}
+
+			const msgType = status & 0xf0
+			const midiCh = status & 0x0f
+
+			if (msgType === 0x90) {
+				// Note On (3 bytes total: status, note, velocity)
+				if (i + 1 < data.length) {
+					const note = data[i]
+					const velocity = data[i + 1]
+					i += 2
+
+					// Ignore momentary key release (velocity 0x00)
+					if (velocity !== 0x00) {
+						const isMuted = velocity >= 0x40
+						const key = `${midiCh}:${note}`
+
+						if (this.muteStateCache[key] !== isMuted) {
+							this.muteStateCache[key] = isMuted
+							changedMutes = true
+							const midiBase = (this.config.midiBase ?? 1) - 1
+							const relCh = midiCh - midiBase
+							if (relCh === 0) changedFeedbacks.add('mute_input')
+							else if (relCh === 1) {
+								changedFeedbacks.add('mute_mono_group')
+								changedFeedbacks.add('mute_stereo_group')
+							} else if (relCh === 2) {
+								changedFeedbacks.add('mute_mono_aux')
+								changedFeedbacks.add('mute_stereo_aux')
+							} else if (relCh === 3) {
+								changedFeedbacks.add('mute_mono_matrix')
+								changedFeedbacks.add('mute_stereo_matrix')
+							} else if (relCh === 4) {
+								changedFeedbacks.add('mute_mono_fx_send')
+								changedFeedbacks.add('mute_stereo_fx_send')
+								changedFeedbacks.add('mute_fx_return')
+								changedFeedbacks.add('mute_master')
+								changedFeedbacks.add('mute_dca')
+								changedFeedbacks.add('mute_group')
+							}
+						}
+					}
+				} else {
+					break
+				}
+			} else if (msgType === 0x80) {
+				// Note Off (3 bytes total: status, note, velocity) - ignore for mute state
+				if (i + 1 < data.length) {
+					i += 2
+				} else {
+					break
+				}
+			} else if (msgType === 0xb0) {
+				// Control Change (3 bytes total: status, controller, value)
+				if (i + 1 < data.length) {
+					const controller = data[i]
+					const val = data[i + 1]
+					i += 2
+
+					if (controller === 0x63) {
+						// NRPN MSB
+						this.nrpnMSB[midiCh] = val
+					} else if (controller === 0x62) {
+						// NRPN LSB
+						this.nrpnLSB[midiCh] = val
+					} else if (controller === 0x06) {
+						// Data Entry MSB
+						if (this.nrpnLSB[midiCh] === 0x17) {
+							const channel = this.nrpnMSB[midiCh]
+							if (channel !== undefined) {
+								this.faderLevelCache[`${midiCh}:${channel}`] = val
+								this.updateFaderLevelVariable(midiCh, channel, val)
+							}
+						}
+					}
+				} else {
+					break
+				}
+			} else if (msgType === 0xa0 || msgType === 0xe0) {
+				if (i + 1 < data.length) {
+					i += 2
+				} else {
+					break
+				}
+			} else if (msgType === 0xc0 || msgType === 0xd0) {
+				if (i < data.length) {
+					i += 1
+				} else {
+					break
+				}
+			} else if (status === 0xf0) {
+				// Sysex
+				while (i < data.length && data[i] !== 0xf7) {
+					i++
+				}
+				if (i < data.length) {
+					i++
+				}
+				runningStatus = 0
+			} else {
+				if (isStatusByte) {
+					// Already advanced i
+				} else {
+					i++
+				}
+			}
+		}
+
+		if (changedMutes && changedFeedbacks.size > 0) {
+			const arr = Array.from(changedFeedbacks)
+			const first = arr[0]
+			if (first) {
+				this.checkFeedbacks(first, ...arr.slice(1))
+			}
+		}
+	}
+
+	updateFaderLevelVariable(midiOffset: number, channel: number, level: number): void {
+		const midiBase = (this.config.midiBase ?? 1) - 1
+		const relOffset = midiOffset - midiBase
+
+		let prefix = ''
+		let index = 1
+
+		if (relOffset === 0) {
+			prefix = 'fader_input'
+			index = channel + 1
+		} else if (relOffset === 1) {
+			if (channel >= 0x3f) {
+				prefix = 'fader_stereo_group'
+				index = channel - 0x3f + 1
+			} else {
+				prefix = 'fader_mono_group'
+				index = channel + 1
+			}
+		} else if (relOffset === 2) {
+			if (channel >= 0x3f) {
+				prefix = 'fader_stereo_aux'
+				index = channel - 0x3f + 1
+			} else {
+				prefix = 'fader_mono_aux'
+				index = channel + 1
+			}
+		} else if (relOffset === 3) {
+			if (channel >= 0x3f) {
+				prefix = 'fader_stereo_matrix'
+				index = channel - 0x3f + 1
+			} else {
+				prefix = 'fader_mono_matrix'
+				index = channel + 1
+			}
+		} else if (relOffset === 4) {
+			if (channel >= 0x35 && channel <= 0x44) {
+				prefix = 'fader_dca'
+				index = channel - 0x35 + 1
+			} else if (channel >= 0x2f && channel <= 0x31) {
+				prefix = 'fader_main'
+				index = channel - 0x2f + 1
+			} else if (channel >= 0x0f && channel <= 0x1a) {
+				prefix = 'fader_stereo_fx_send'
+				index = channel - 0x0f + 1
+			} else if (channel >= 0x1f && channel <= 0x2a) {
+				prefix = 'fader_fx_return'
+				index = channel - 0x1f + 1
+			} else if (channel < 0x0f) {
+				prefix = 'fader_mono_fx_send'
+				index = channel + 1
+			}
+		}
+
+		if (prefix) {
+			const dbStr = faderLevelToDbMap[level] ?? '-inf'
+			this.setVariableValues({
+				[`${prefix}_${index}`]: `${dbStr} dB`,
+			})
+		}
 	}
 
 	setupSceneSelection(): void {
@@ -162,34 +419,46 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 		switch (action.action) {
 			case 'mute_input':
-				bufferCommands = this.buildMuteCommand(opt as { channel: number; mute: boolean }, midiBase)
+				bufferCommands = this.buildMuteCommand(opt as { channel: number; mute: string | boolean }, midiBase)
 				break
 			case 'fader_input':
-				bufferCommands = this.buildFaderCommand(opt as { level: string; channel: number }, midiBase)
+				bufferCommands = this.handleFaderAction(
+					opt as { level: string; channel: number; fadeDuration?: string | number },
+					midiBase,
+				)
 				break
 			case 'mute_mono_group':
 			case 'mute_stereo_group':
-				bufferCommands = this.buildMuteCommand(opt as { channel: number; mute: boolean }, midiBase + 1)
+				bufferCommands = this.buildMuteCommand(opt as { channel: number; mute: string | boolean }, midiBase + 1)
 				break
 			case 'fader_mono_group':
 			case 'fader_stereo_group':
-				bufferCommands = this.buildFaderCommand(opt as { level: string; channel: number }, midiBase + 1)
+				bufferCommands = this.handleFaderAction(
+					opt as { level: string; channel: number; fadeDuration?: string | number },
+					midiBase + 1,
+				)
 				break
 			case 'mute_mono_aux':
 			case 'mute_stereo_aux':
-				bufferCommands = this.buildMuteCommand(opt as { channel: number; mute: boolean }, midiBase + 2)
+				bufferCommands = this.buildMuteCommand(opt as { channel: number; mute: string | boolean }, midiBase + 2)
 				break
 			case 'fader_mono_aux':
 			case 'fader_stereo_aux':
-				bufferCommands = this.buildFaderCommand(opt as { level: string; channel: number }, midiBase + 2)
+				bufferCommands = this.handleFaderAction(
+					opt as { level: string; channel: number; fadeDuration?: string | number },
+					midiBase + 2,
+				)
 				break
 			case 'mute_mono_matrix':
 			case 'mute_stereo_matrix':
-				bufferCommands = this.buildMuteCommand(opt as { channel: number; mute: boolean }, midiBase + 3)
+				bufferCommands = this.buildMuteCommand(opt as { channel: number; mute: string | boolean }, midiBase + 3)
 				break
 			case 'fader_mono_matrix':
 			case 'fader_stereo_matrix':
-				bufferCommands = this.buildFaderCommand(opt as { level: string; channel: number }, midiBase + 3)
+				bufferCommands = this.handleFaderAction(
+					opt as { level: string; channel: number; fadeDuration?: string | number },
+					midiBase + 3,
+				)
 				break
 			case 'mute_mono_fx_send':
 			case 'mute_stereo_fx_send':
@@ -197,14 +466,17 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			case 'mute_dca':
 			case 'mute_master':
 			case 'mute_group':
-				bufferCommands = this.buildMuteCommand(opt as { channel: number; mute: boolean }, midiBase + 4)
+				bufferCommands = this.buildMuteCommand(opt as { channel: number; mute: string | boolean }, midiBase + 4)
 				break
 			case 'fader_DCA':
 			case 'fader_mono_fx_send':
 			case 'fader_stereo_fx_send':
 			case 'fader_fx_return':
 			case 'fader_master':
-				bufferCommands = this.buildFaderCommand(opt as { level: string; channel: number }, midiBase + 4)
+				bufferCommands = this.handleFaderAction(
+					opt as { level: string; channel: number; fadeDuration?: string | number },
+					midiBase + 4,
+				)
 				break
 			case 'dca_assign':
 				bufferCommands = this.buildAssignCommands(
@@ -283,18 +555,100 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		}
 	}
 
-	buildMuteCommand(opt: { channel: number; mute: boolean }, midiOffset: number): Buffer[] {
-		return [Buffer.from([0x90 + midiOffset, opt.channel, opt.mute ? 0x7f : 0x3f, 0x90 + midiOffset, opt.channel, 0x00])]
+	buildMuteCommand(opt: { channel: number; mute: string | boolean }, midiOffset: number): Buffer[] {
+		const channel = Number(opt.channel)
+		const key = `${midiOffset}:${channel}`
+		const muteState =
+			opt.mute === 'toggle'
+				? !this.muteStateCache[key]
+				: opt.mute === true || opt.mute === 'true' || opt.mute === 'mute'
+
+		if (this.muteStateCache[key] !== muteState) {
+			this.muteStateCache[key] = muteState
+			const midiBase = (this.config.midiBase ?? 1) - 1
+			const relOffset = midiOffset - midiBase
+			if (relOffset === 0) {
+				this.checkFeedbacks('mute_input')
+			} else if (relOffset === 1) {
+				this.checkFeedbacks('mute_mono_group', 'mute_stereo_group')
+			} else if (relOffset === 2) {
+				this.checkFeedbacks('mute_mono_aux', 'mute_stereo_aux')
+			} else if (relOffset === 3) {
+				this.checkFeedbacks('mute_mono_matrix', 'mute_stereo_matrix')
+			} else if (relOffset === 4) {
+				this.checkFeedbacks(
+					'mute_mono_fx_send',
+					'mute_stereo_fx_send',
+					'mute_fx_return',
+					'mute_master',
+					'mute_dca',
+					'mute_group',
+				)
+			}
+		}
+		return [Buffer.from([0x90 + midiOffset, channel, muteState ? 0x7f : 0x3f, 0x90 + midiOffset, channel, 0x00])]
+	}
+
+	handleFaderAction(
+		opt: { level: string; channel: number; fadeDuration?: string | number },
+		midiOffset: number,
+	): Buffer[] {
+		const fadeDuration = Number(opt.fadeDuration ?? 0)
+		if (Number.isFinite(fadeDuration) && fadeDuration > 0) {
+			this.fadeFaderCommand(opt, midiOffset, fadeDuration)
+			return []
+		}
+
+		return this.buildFaderCommand(opt, midiOffset)
+	}
+
+	fadeFaderCommand(opt: { level: string; channel: number }, midiOffset: number, fadeDuration: number): void {
+		const targetLevel = parseInt(opt.level)
+		const channel = Number(opt.channel)
+		const key = `${midiOffset}:${channel}`
+		const startLevel = this.faderLevelCache[key]
+
+		this.clearFaderFadeTimers(key)
+
+		if (startLevel === undefined || startLevel === targetLevel) {
+			this.writeCommand(this.buildFaderCommand(opt, midiOffset)[0])
+			return
+		}
+
+		const stepCount = Math.max(2, Math.min(40, Math.round(fadeDuration * 10)))
+		const values = Array.from(
+			new Set(
+				Array.from({ length: stepCount }, (_, index) =>
+					Math.round(startLevel + ((targetLevel - startLevel) * (index + 1)) / stepCount),
+				),
+			),
+		)
+		const intervalMs = Math.max(50, Math.round((fadeDuration * 1000) / values.length))
+
+		this.faderFadeTimers[key] = values.map((level, index) =>
+			setTimeout(
+				() => {
+					this.writeCommand(this.buildFaderCommand({ level: String(level), channel: opt.channel }, midiOffset)[0])
+					if (index === values.length - 1) {
+						delete this.faderFadeTimers[key]
+					}
+				},
+				intervalMs * (index + 1),
+			),
+		)
 	}
 
 	buildFaderCommand(opt: { level: string; channel: number }, midiOffset: number): Buffer[] {
 		const faderLevel = parseInt(opt.level)
+		const channel = Number(opt.channel)
+		this.faderLevelCache[`${midiOffset}:${channel}`] = faderLevel
+		this.updateFaderLevelVariable(midiOffset, channel, faderLevel)
 
 		return [
 			Buffer.from([
 				0xb0 + midiOffset,
 				0x63,
-				opt.channel,
+				channel,
 				0xb0 + midiOffset,
 				0x62,
 				0x17,
@@ -382,23 +736,24 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	buildSendLevelCommand(
-		opt: { srcChannel: string | number; destChannel: number; level: string },
+		opt: { srcChannel: string | number | (string | number)[]; destChannel: number; level: string },
 		baseMidi: number,
 		srcMidiChnl: number,
 		destMidiChnl: number,
 	): Buffer[] {
-		return [
+		const sourceChannels = Array.isArray(opt.srcChannel) ? opt.srcChannel : [opt.srcChannel]
+		return sourceChannels.map((sourceChannel) =>
 			Buffer.from([
 				...SysExHeader,
 				0x00 + baseMidi + srcMidiChnl,
 				0x0d,
-				parseInt(String(opt.srcChannel)),
+				parseInt(String(sourceChannel)),
 				baseMidi + destMidiChnl,
 				opt.destChannel,
 				parseInt(opt.level),
 				0xf7,
 			]),
-		]
+		)
 	}
 
 	buildSendLevelNumberCommand(
@@ -449,5 +804,21 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 	dumpData(opt: CompanionOptionValues, midiBase: number, bufferCommands: Buffer[]): void {
 		this.log('debug', `dumpData: ${JSON.stringify(opt)} ${midiBase} ${bufferCommands.length}`)
+	}
+
+	writeCommand(command: Buffer): void {
+		if (this.tcpSocket?.writable) {
+			this.tcpSocket.write(command)
+		}
+	}
+
+	clearFaderFadeTimers(key?: string): void {
+		const keys = key ? [key] : Object.keys(this.faderFadeTimers)
+		for (const timerKey of keys) {
+			for (const timer of this.faderFadeTimers[timerKey] ?? []) {
+				clearTimeout(timer)
+			}
+			delete this.faderFadeTimers[timerKey]
+		}
 	}
 }

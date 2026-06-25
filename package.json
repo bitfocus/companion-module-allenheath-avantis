@@ -14,7 +14,7 @@
     "package": "run build && companion-module-build",
     "build": "rimraf dist && yarn build:main && yarn build:assets",
     "build:main": "tsc -p tsconfig.build.json",
-    "build:assets": "cp src/avantisconfig.json src/fader.json dist/",
+    "build:assets": "node -e \"const fs=require('node:fs'); for (const file of ['avantisconfig.json','fader.json']) fs.copyFileSync('src/'+file,'dist/'+file)\"",
     "dev": "tsc -p tsconfig.build.json --watch",
     "lint:raw": "eslint",
     "lint": "run lint:raw ."

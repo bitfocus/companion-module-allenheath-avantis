@@ -1,10 +1,10 @@
 {
-  "extends": "./tsconfig.build.json",
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules/**"],
-  "compilerOptions": {
-    "resolveJsonModule": true,
-    "esModuleInterop": true,
-    "types": ["node"]
-  },
+	"extends": "./tsconfig.build.json",
+	"include": ["src/**/*.ts"],
+	"exclude": ["node_modules/**"],
+	"compilerOptions": {
+		"resolveJsonModule": true,
+		"esModuleInterop": true,
+		"types": ["node"]
+	}
 }

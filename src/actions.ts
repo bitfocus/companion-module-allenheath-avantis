@@ -45,7 +45,7 @@ export function UpdateActions(self: ModuleInstance): void {
 	const actions: CompanionActionDefinitions = {}
 	const avantis = avantisConfig.config
 
-	const inputChannels = buildChoices('Input Channel', 'CH', avantis.inputCount, -1)
+	const inputChannels = buildChoices('Input Channel', 'CH', self.config.inputCount ?? avantis.inputCount, -1)
 	const scenes = buildChoices('Scene', 'SCENE', avantis.sceneCount, -1)
 	const dca = buildChoices('DCA', 'DCA', avantis.dcaCount, 0x35)
 	const muteGroups = buildChoices('Mute Group', 'MUTE', avantis.muteGroupCount, 0x45)
@@ -96,10 +96,16 @@ export function UpdateActions(self: ModuleInstance): void {
 				minChoicesForSearch: 0,
 			},
 			{
-				type: 'checkbox',
+				type: 'dropdown',
 				label: 'Mute',
 				id: 'mute',
-				default: true,
+				default: 'mute',
+				choices: [
+					{ label: 'Mute', id: 'mute' },
+					{ label: 'Unmute', id: 'unmute' },
+					{ label: 'Toggle', id: 'toggle' },
+				],
+				minChoicesForSearch: 0,
 			},
 		],
 		callback: (action) => dispatchAction(self, action),
@@ -123,6 +129,16 @@ export function UpdateActions(self: ModuleInstance): void {
 				default: 1 + faderChoices.offset,
 				choices: faderChoices.values,
 				minChoicesForSearch: 0,
+			},
+			{
+				type: 'number',
+				label: 'Fade Duration (seconds)',
+				id: 'fadeDuration',
+				min: 0,
+				max: 20,
+				step: 0.5,
+				default: 0,
+				tooltip: 'Optional smooth fade duration; 0 = immediate.',
 			},
 		],
 		callback: (action) => dispatchAction(self, action),
