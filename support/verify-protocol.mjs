@@ -138,6 +138,22 @@ check(
 )
 check('send variable follows', vars['send_in12_to_mono_aux_3'], '-19 dB')
 
+// --- 5b. The (Number) send variant must seed the cache too ------------------
+self.sendLevelCache = {}
+// Level index 13 on the 0-19 scale is 0x5F (-6 dB); CH 42 -> Mono Aux 8.
+check(
+	'number-variant send bytes',
+	hex(self.buildSendLevelNumberCommand({ srcChannel: 41, destChannel: 7, 'level-int': 13 }, midiBase, 0, 2)),
+	['F0 00 00 1A 50 10 01 00 0B 0D 29 0D 07 5F F7'],
+)
+check('number-variant seeds the cache', self.sendLevelCache['0:41:2:7'], 0x5f)
+check('number-variant sets the variable', vars['send_in42_to_mono_aux_8'], '-6 dB')
+check(
+	'dial can then move relative to it',
+	hex(self.buildSendAdjustCommand({ srcChannel: 41, destChannel: 7, delta: 1 }, midiBase, 0, 2)),
+	['F0 00 00 1A 50 10 01 00 0B 0D 29 0D 07 61 F7'],
+)
+
 // --- 6. Learning a send level from an incoming SysEx ------------------------
 self.sendLevelCache = {}
 self.handleIncomingSysex(Buffer.from([0x00, 0x00, 0x1a, 0x50, 0x10, 0x01, 0x00, 0x0b, 0x0d, 0x05, 0x0d, 0x01, 0x57]))

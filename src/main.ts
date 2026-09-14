@@ -1021,15 +1021,28 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 		this.log('debug', `levelAsHexString: ${levelAsHexString}`)
 
+		const source = parseInt(String(opt.srcChannel))
+		const level = parseInt(levelAsHexString)
+
+		// Seed the cache just as the dB variant does, so a relative move on a
+		// dial can start from a level this action set.
+		this.updateSendLevel(
+			`${srcMidiChnl}:${source}:${destMidiChnl}:${opt.destChannel}`,
+			source,
+			destMidiChnl,
+			opt.destChannel,
+			level,
+		)
+
 		return [
 			Buffer.from([
 				...SysExHeader,
 				0x00 + baseMidi + srcMidiChnl,
 				0x0d,
-				parseInt(String(opt.srcChannel)),
+				source,
 				baseMidi + destMidiChnl,
 				opt.destChannel,
-				parseInt(levelAsHexString),
+				level,
 				0xf7,
 			]),
 		]
