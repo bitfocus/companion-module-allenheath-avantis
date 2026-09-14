@@ -8,6 +8,7 @@ import {
 } from '@companion-module/base'
 import avantisConfig from './avantisconfig.json' with { type: 'json' }
 import fader from './fader.json' with { type: 'json' }
+import { LEVEL_MAX, LEVEL_MIN } from './levels.js'
 import type ModuleInstance from './main.js'
 
 type ChoiceGroup = {
@@ -144,6 +145,101 @@ export function UpdateActions(self: ModuleInstance): void {
 		callback: (action) => dispatchAction(self, action),
 	})
 
+	// Shared tail for every relative action: how far one turn moves, the window
+	// the level is held inside, and whether a fast spin moves further.
+	const adjustOptions = () =>
+		[
+			{
+				type: 'number',
+				label: 'Adjust by (dB)',
+				id: 'delta',
+				default: 1,
+				min: -24,
+				max: 24,
+				step: 0.5,
+				tooltip: 'Put a positive value on Rotate Right and the matching negative value on Rotate Left.',
+			},
+			{
+				type: 'dropdown',
+				label: 'Lower limit',
+				id: 'minLevel',
+				default: LEVEL_MIN,
+				choices: faderChoices.values,
+				minChoicesForSearch: 0,
+				tooltip: 'The level will never be driven below this.',
+			},
+			{
+				type: 'dropdown',
+				label: 'Upper limit',
+				id: 'maxLevel',
+				default: LEVEL_MAX,
+				choices: faderChoices.values,
+				minChoicesForSearch: 0,
+				tooltip: 'The level will never be driven above this.',
+			},
+			{
+				type: 'dropdown',
+				label: 'If the current level is unknown',
+				id: 'unknownLevel',
+				default: 'none',
+				choices: [{ id: 'none', label: 'Do nothing (wait until the level is known)' }, ...faderChoices.values],
+				minChoicesForSearch: 0,
+				tooltip:
+					'Relative moves need a starting point. Waiting is safest: assuming a level means the first turn jumps the level from wherever it really is to whatever was assumed.',
+			},
+			{
+				type: 'checkbox',
+				label: 'Accelerate on fast turns',
+				id: 'accel',
+				default: false,
+				tooltip: 'Spin the dial quickly to move in bigger steps. Leave off for predictable, even detents.',
+			},
+		] satisfies CompanionActionDefinition['options']
+
+	const faderAdjustActionBuilder = (label: string, choice: ChoiceGroup): CompanionActionDefinition => ({
+		name: label,
+		options: [
+			{
+				type: 'dropdown',
+				label: choice.name,
+				id: 'channel',
+				default: 1 + choice.offset,
+				choices: choice.values,
+				minChoicesForSearch: 0,
+			},
+			...adjustOptions(),
+		],
+		callback: (action) => dispatchAction(self, action),
+	})
+
+	const sendAdjustActionBuilder = (
+		label: string,
+		srcChoice: ChoiceGroup,
+		destChoice: ChoiceGroup,
+	): CompanionActionDefinition => ({
+		name: label,
+		options: [
+			{
+				type: 'dropdown',
+				label: srcChoice.name,
+				id: 'srcChannel',
+				default: 1 + srcChoice.offset,
+				choices: srcChoice.values,
+				minChoicesForSearch: 0,
+			},
+			{
+				type: 'dropdown',
+				label: destChoice.name,
+				id: 'destChannel',
+				default: 1 + destChoice.offset,
+				choices: destChoice.values,
+				minChoicesForSearch: 0,
+			},
+			...adjustOptions(),
+		],
+		callback: (action) => dispatchAction(self, action),
+	})
+
 	const sendLevelActionBuilder = (
 		label: string,
 		srcChoice: ChoiceGroup,
@@ -274,6 +370,75 @@ export function UpdateActions(self: ModuleInstance): void {
 	actions['fader_master'] = faderActionBuilder('Set Main Mix Master Fader to Level', mainMix)
 	actions['fader_fx_return'] = faderActionBuilder('Set FX Return Fader to Level', fxReturns)
 	actions['fader_DCA'] = faderActionBuilder('Set DCA Fader to Level', dca)
+
+	// Relative fader moves, for rotary controls such as the Stream Deck+ dials.
+	actions['fader_adjust_input'] = faderAdjustActionBuilder('Adjust Input Fader (relative)', inputChannels)
+	actions['fader_adjust_mono_group'] = faderAdjustActionBuilder('Adjust Mono Group Master Fader (relative)', monoGroups)
+	actions['fader_adjust_stereo_group'] = faderAdjustActionBuilder(
+		'Adjust Stereo Group Master Fader (relative)',
+		stereoGroups,
+	)
+	actions['fader_adjust_mono_aux'] = faderAdjustActionBuilder('Adjust Mono Aux Master Fader (relative)', monoAuxes)
+	actions['fader_adjust_stereo_aux'] = faderAdjustActionBuilder(
+		'Adjust Stereo Aux Master Fader (relative)',
+		stereoAuxes,
+	)
+	actions['fader_adjust_mono_matrix'] = faderAdjustActionBuilder(
+		'Adjust Mono Matrix Master Fader (relative)',
+		monoMatrices,
+	)
+	actions['fader_adjust_stereo_matrix'] = faderAdjustActionBuilder(
+		'Adjust Stereo Matrix Master Fader (relative)',
+		stereoMatrices,
+	)
+	actions['fader_adjust_mono_fx_send'] = faderAdjustActionBuilder(
+		'Adjust Mono FX Send Master Fader (relative)',
+		monoFxSends,
+	)
+	actions['fader_adjust_stereo_fx_send'] = faderAdjustActionBuilder(
+		'Adjust Stereo FX Send Master Fader (relative)',
+		stereoFxSends,
+	)
+	actions['fader_adjust_master'] = faderAdjustActionBuilder('Adjust Main Mix Master Fader (relative)', mainMix)
+	actions['fader_adjust_fx_return'] = faderAdjustActionBuilder('Adjust FX Return Fader (relative)', fxReturns)
+	actions['fader_adjust_dca'] = faderAdjustActionBuilder('Adjust DCA Fader (relative)', dca)
+
+	// Relative send moves - the monitor-send case a dial is most useful for.
+	actions['send_adjust_input_to_mono_aux'] = sendAdjustActionBuilder(
+		'Adjust Send Input to Mono Aux (relative)',
+		inputChannels,
+		monoAuxes,
+	)
+	actions['send_adjust_input_to_stereo_aux'] = sendAdjustActionBuilder(
+		'Adjust Send Input to Stereo Aux (relative)',
+		inputChannels,
+		stereoAuxes,
+	)
+	actions['send_adjust_input_to_mono_matrix'] = sendAdjustActionBuilder(
+		'Adjust Send Input to Mono Matrix (relative)',
+		inputChannels,
+		monoMatrices,
+	)
+	actions['send_adjust_input_to_stereo_matrix'] = sendAdjustActionBuilder(
+		'Adjust Send Input to Stereo Matrix (relative)',
+		inputChannels,
+		stereoMatrices,
+	)
+	actions['send_adjust_input_to_mono_fx_send'] = sendAdjustActionBuilder(
+		'Adjust Send Input to Mono FX Send (relative)',
+		inputChannels,
+		monoFxSends,
+	)
+	actions['send_adjust_input_to_stereo_fx_send'] = sendAdjustActionBuilder(
+		'Adjust Send Input to Stereo FX Send (relative)',
+		inputChannels,
+		stereoFxSends,
+	)
+	actions['send_adjust_input_to_main'] = sendAdjustActionBuilder(
+		'Adjust Send Input to Main Mix (relative)',
+		inputChannels,
+		mainMix,
+	)
 
 	actions['dca_assign'] = assignActionBuilder('Assign DCA Groups for Channel', inputChannels, 'dcaGroup', dca)
 	actions['mute_group_assign'] = assignActionBuilder(

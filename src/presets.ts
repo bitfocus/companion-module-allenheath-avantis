@@ -19,6 +19,12 @@ const PURPLE = combineRgb(128, 0, 255)
 const channelRange = (start: number, end: number) =>
 	Array.from({ length: end - start + 1 }, (_, index) => start + index)
 
+/** Level byte for 0 dB, used as the press-to-grab point on fader dials. */
+const LEVEL_UNITY = 0x6b
+
+/** Level byte for -20 dB: a deliberately quiet place to take hold of a send. */
+const SEND_SEED_LEVEL = 0x43
+
 function buildMutePreset(
 	id: string,
 	name: string,
@@ -106,7 +112,92 @@ function buildFaderPreset(
 	}
 }
 
-export function GetPresetDefinitions(inputCount: number): CompanionPresetDefinitions<ModuleSchema> {
+/**
+ * A rotary preset for a Stream Deck+ dial (or any surface with rotation).
+ *
+ * Turning nudges the level; pressing sets it to a known value.  The press
+ * matters more than it looks: relative moves need a starting point, and the
+ * actions ship set to sit still until the level is known rather than assume
+ * one and jump a live fader on the first turn.
+ */
+function buildFaderDialPreset(
+	id: string,
+	name: string,
+	text: string,
+	actionId:
+		| 'fader_adjust_input'
+		| 'fader_adjust_mono_aux'
+		| 'fader_adjust_stereo_aux'
+		| 'fader_adjust_dca'
+		| 'fader_adjust_master',
+	seedActionId: 'fader_input' | 'fader_mono_aux' | 'fader_stereo_aux' | 'fader_DCA' | 'fader_master',
+	channel: number,
+	bgcolor: number,
+): CompanionSimplePresetDefinition<ModuleSchema> {
+	const adjust = { channel, minLevel: 0x00, maxLevel: 0x7f, unknownLevel: 'none', accel: false }
+
+	return {
+		type: 'simple',
+		name,
+		style: { text, size: '14', color: WHITE, bgcolor },
+		steps: [
+			{
+				down: [{ actionId: seedActionId, options: { channel, level: LEVEL_UNITY, fadeDuration: 0 } }],
+				up: [],
+				rotate_left: [{ actionId, options: { ...adjust, delta: -1 } }],
+				rotate_right: [{ actionId, options: { ...adjust, delta: 1 } }],
+			},
+		],
+		feedbacks: [],
+		keywords: [id, 'dial', 'rotary', 'fader', 'trim'],
+	}
+}
+
+function buildSendDialPreset(
+	id: string,
+	name: string,
+	text: string,
+	srcChannel: number,
+	destChannel: number,
+	bgcolor: number,
+): CompanionSimplePresetDefinition<ModuleSchema> {
+	const adjust = {
+		srcChannel,
+		destChannel,
+		minLevel: 0x00,
+		maxLevel: 0x7f,
+		unknownLevel: 'none',
+		accel: false,
+	}
+
+	return {
+		type: 'simple',
+		name,
+		style: { text, size: '14', color: WHITE, bgcolor },
+		steps: [
+			{
+				// The desk never reports send levels, so the press is the only way
+				// this dial learns where it is starting from.
+				down: [
+					{
+						actionId: 'send_input_to_mono_aux',
+						options: { srcChannel: [srcChannel], destChannel, level: SEND_SEED_LEVEL },
+					},
+				],
+				up: [],
+				rotate_left: [{ actionId: 'send_adjust_input_to_mono_aux', options: { ...adjust, delta: -1 } }],
+				rotate_right: [{ actionId: 'send_adjust_input_to_mono_aux', options: { ...adjust, delta: 1 } }],
+			},
+		],
+		feedbacks: [],
+		keywords: [id, 'dial', 'rotary', 'send', 'monitor', 'aux'],
+	}
+}
+
+export function GetPresetDefinitions(
+	inputCount: number,
+	connectionLabel: string,
+): CompanionPresetDefinitions<ModuleSchema> {
 	const presets: CompanionPresetDefinitions<ModuleSchema> = {}
 	const avantis = avantisConfig.config
 
@@ -525,7 +616,79 @@ export function GetPresetDefinitions(inputCount: number): CompanionPresetDefinit
 		}
 	}
 
+	addDialPresets(presets, inputCount, connectionLabel)
+
 	return presets
+}
+
+/**
+ * Ready-made rotary buttons for Stream Deck+ dials.
+ *
+ * `label` is this connection's own label, which is the prefix its variables are
+ * addressed by. Reading it at runtime rather than assuming the module shortname
+ * keeps the button text working when the connection has been renamed.
+ */
+function addDialPresets(presets: CompanionPresetDefinitions<ModuleSchema>, inputCount: number, label: string): void {
+	const avantis = avantisConfig.config
+	const auxDialCount = Math.min(8, avantis.mono.auxCount)
+
+	for (let channel = 1; channel <= inputCount; channel++) {
+		presets[`dial_fader_input_${channel}`] = buildFaderDialPreset(
+			`dial_fader_input_${channel}`,
+			`Dial: CH ${channel} fader`,
+			`CH ${channel}\n$(${label}:fader_input_${channel})\npress 0dB`,
+			'fader_adjust_input',
+			'fader_input',
+			channel - 1,
+			BLUE,
+		)
+	}
+
+	for (let dca = 1; dca <= avantis.dcaCount; dca++) {
+		presets[`dial_fader_dca_${dca}`] = buildFaderDialPreset(
+			`dial_fader_dca_${dca}`,
+			`Dial: DCA ${dca} fader`,
+			`DCA ${dca}\n$(${label}:fader_dca_${dca})\npress 0dB`,
+			'fader_adjust_dca',
+			'fader_DCA',
+			dca + 0x35,
+			PURPLE,
+		)
+	}
+
+	for (let main = 1; main <= avantis.mainsCount; main++) {
+		presets[`dial_fader_main_${main}`] = buildFaderDialPreset(
+			`dial_fader_main_${main}`,
+			`Dial: Main ${main} fader`,
+			`MAIN ${main}\n$(${label}:fader_main_${main})\npress 0dB`,
+			'fader_adjust_master',
+			'fader_master',
+			main + 0x2f,
+			GREEN,
+		)
+	}
+
+	for (let aux = 1; aux <= auxDialCount; aux++) {
+		presets[`dial_fader_mono_aux_${aux}`] = buildFaderDialPreset(
+			`dial_fader_mono_aux_${aux}`,
+			`Dial: Mono Aux ${aux} master fader`,
+			`AUX ${aux}\n$(${label}:fader_mono_aux_${aux})\npress 0dB`,
+			'fader_adjust_mono_aux',
+			'fader_mono_aux',
+			aux - 1,
+			AMBER,
+		)
+
+		// Monitor sends: input 1 into each aux, as a template to edit.
+		presets[`dial_send_in1_mono_aux_${aux}`] = buildSendDialPreset(
+			`dial_send_in1_mono_aux_${aux}`,
+			`Dial: CH 1 send to Mono Aux ${aux}`,
+			`CH 1>AUX ${aux}\n$(${label}:send_in1_to_mono_aux_${aux})\npress -20dB`,
+			0,
+			aux - 1,
+			AMBER,
+		)
+	}
 }
 
 export function GetPresetSections(inputCount: number): CompanionPresetSection<ModuleSchema>[] {
@@ -582,6 +745,21 @@ export function GetPresetSections(inputCount: number): CompanionPresetSection<Mo
 	const sendLevelPresets: string[] = []
 	for (let i = 1; i <= Math.min(avantis.mono.auxCount, 16); i++) {
 		sendLevelPresets.push(`send_ch1_mono_aux_${i}_0db`)
+	}
+
+	const dialPresets: string[] = []
+	for (let i = 1; i <= inputCount; i++) {
+		dialPresets.push(`dial_fader_input_${i}`)
+	}
+	for (let i = 1; i <= avantis.dcaCount; i++) {
+		dialPresets.push(`dial_fader_dca_${i}`)
+	}
+	for (let i = 1; i <= avantis.mainsCount; i++) {
+		dialPresets.push(`dial_fader_main_${i}`)
+	}
+	for (let i = 1; i <= Math.min(8, avantis.mono.auxCount); i++) {
+		dialPresets.push(`dial_fader_mono_aux_${i}`)
+		dialPresets.push(`dial_send_in1_mono_aux_${i}`)
 	}
 
 	const colorPresets: string[] = ['channel_1_name']
@@ -676,6 +854,18 @@ export function GetPresetSections(inputCount: number): CompanionPresetSection<Mo
 			],
 		},
 		{
+			id: 'dials',
+			name: 'Dials (Stream Deck+)',
+			definitions: [
+				{
+					id: 'dials-group',
+					type: 'simple',
+					name: 'Dials (Stream Deck+)',
+					presets: dialPresets,
+				},
+			],
+		},
+		{
 			id: 'scenes',
 			name: 'Scenes',
 			definitions: [
@@ -716,7 +906,7 @@ export function GetPresetSections(inputCount: number): CompanionPresetSection<Mo
 
 export function UpdatePresets(self: ModuleInstance): void {
 	const inputCount = self.config.inputCount ?? avantisConfig.config.inputCount
-	self.setPresetDefinitions(GetPresetSections(inputCount), GetPresetDefinitions(inputCount))
+	self.setPresetDefinitions(GetPresetSections(inputCount), GetPresetDefinitions(inputCount, self.label))
 }
 
 export default UpdatePresets

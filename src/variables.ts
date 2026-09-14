@@ -4,7 +4,12 @@ import type ModuleInstance from './main.js'
 
 export type VariablesSchema = Record<string, CompanionVariableValue>
 
-export function UpdateVariableDefinitions(self: ModuleInstance): void {
+/**
+ * @param setInitialValues clear every level back to -inf.  Only wanted on the
+ * first pass: re-registering definitions to add a send variable must not wipe
+ * the levels the desk has already reported.
+ */
+export function UpdateVariableDefinitions(self: ModuleInstance, setInitialValues = true): void {
 	const definitions: CompanionVariableDefinitions<VariablesSchema> = {}
 	const initialValues: Record<string, CompanionVariableValue> = {}
 	const avantis = avantisConfig.config
@@ -78,8 +83,19 @@ export function UpdateVariableDefinitions(self: ModuleInstance): void {
 		addVar('fader_fx_return', i, 'FX Return')
 	}
 
+	// Send levels are registered as they are used - declaring every possible
+	// source/destination pair up front would run to thousands of variables.
+	for (const variableId of Object.values(self.sendVariableNames)) {
+		definitions[variableId] = {
+			name: variableId.replace(/_/g, ' ').replace(/^send in/, 'Send: Input') + ' Level (dB)',
+		}
+	}
+
 	self.setVariableDefinitions(definitions)
-	self.setVariableValues(initialValues)
+
+	if (setInitialValues) {
+		self.setVariableValues(initialValues)
+	}
 }
 
 export default UpdateVariableDefinitions
