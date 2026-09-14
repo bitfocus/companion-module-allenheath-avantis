@@ -25,14 +25,6 @@ const LEVEL_UNITY = 0x6b
 /** Level byte for -20 dB: a deliberately quiet place to take hold of a send. */
 const SEND_SEED_LEVEL = 0x43
 
-/**
- * Presets refer to this connection's own variables. Companion names a new
- * connection after the module's shortname, so this resolves as-is unless the
- * connection has been renamed - in which case update the prefix in the button
- * text.
- */
-const VAR = 'avantis'
-
 function buildMutePreset(
 	id: string,
 	name: string,
@@ -202,7 +194,10 @@ function buildSendDialPreset(
 	}
 }
 
-export function GetPresetDefinitions(inputCount: number): CompanionPresetDefinitions<ModuleSchema> {
+export function GetPresetDefinitions(
+	inputCount: number,
+	connectionLabel: string,
+): CompanionPresetDefinitions<ModuleSchema> {
 	const presets: CompanionPresetDefinitions<ModuleSchema> = {}
 	const avantis = avantisConfig.config
 
@@ -621,13 +616,19 @@ export function GetPresetDefinitions(inputCount: number): CompanionPresetDefinit
 		}
 	}
 
-	addDialPresets(presets, inputCount)
+	addDialPresets(presets, inputCount, connectionLabel)
 
 	return presets
 }
 
-/** Ready-made rotary buttons for Stream Deck+ dials. */
-function addDialPresets(presets: CompanionPresetDefinitions<ModuleSchema>, inputCount: number): void {
+/**
+ * Ready-made rotary buttons for Stream Deck+ dials.
+ *
+ * `label` is this connection's own label, which is the prefix its variables are
+ * addressed by. Reading it at runtime rather than assuming the module shortname
+ * keeps the button text working when the connection has been renamed.
+ */
+function addDialPresets(presets: CompanionPresetDefinitions<ModuleSchema>, inputCount: number, label: string): void {
 	const avantis = avantisConfig.config
 	const auxDialCount = Math.min(8, avantis.mono.auxCount)
 
@@ -635,7 +636,7 @@ function addDialPresets(presets: CompanionPresetDefinitions<ModuleSchema>, input
 		presets[`dial_fader_input_${channel}`] = buildFaderDialPreset(
 			`dial_fader_input_${channel}`,
 			`Dial: CH ${channel} fader`,
-			`CH ${channel}\n$(${VAR}:fader_input_${channel})\npress 0dB`,
+			`CH ${channel}\n$(${label}:fader_input_${channel})\npress 0dB`,
 			'fader_adjust_input',
 			'fader_input',
 			channel - 1,
@@ -647,7 +648,7 @@ function addDialPresets(presets: CompanionPresetDefinitions<ModuleSchema>, input
 		presets[`dial_fader_dca_${dca}`] = buildFaderDialPreset(
 			`dial_fader_dca_${dca}`,
 			`Dial: DCA ${dca} fader`,
-			`DCA ${dca}\n$(${VAR}:fader_dca_${dca})\npress 0dB`,
+			`DCA ${dca}\n$(${label}:fader_dca_${dca})\npress 0dB`,
 			'fader_adjust_dca',
 			'fader_DCA',
 			dca + 0x35,
@@ -659,7 +660,7 @@ function addDialPresets(presets: CompanionPresetDefinitions<ModuleSchema>, input
 		presets[`dial_fader_main_${main}`] = buildFaderDialPreset(
 			`dial_fader_main_${main}`,
 			`Dial: Main ${main} fader`,
-			`MAIN ${main}\n$(${VAR}:fader_main_${main})\npress 0dB`,
+			`MAIN ${main}\n$(${label}:fader_main_${main})\npress 0dB`,
 			'fader_adjust_master',
 			'fader_master',
 			main + 0x2f,
@@ -671,7 +672,7 @@ function addDialPresets(presets: CompanionPresetDefinitions<ModuleSchema>, input
 		presets[`dial_fader_mono_aux_${aux}`] = buildFaderDialPreset(
 			`dial_fader_mono_aux_${aux}`,
 			`Dial: Mono Aux ${aux} master fader`,
-			`AUX ${aux}\n$(${VAR}:fader_mono_aux_${aux})\npress 0dB`,
+			`AUX ${aux}\n$(${label}:fader_mono_aux_${aux})\npress 0dB`,
 			'fader_adjust_mono_aux',
 			'fader_mono_aux',
 			aux - 1,
@@ -682,7 +683,7 @@ function addDialPresets(presets: CompanionPresetDefinitions<ModuleSchema>, input
 		presets[`dial_send_in1_mono_aux_${aux}`] = buildSendDialPreset(
 			`dial_send_in1_mono_aux_${aux}`,
 			`Dial: CH 1 send to Mono Aux ${aux}`,
-			`CH 1>AUX ${aux}\n$(${VAR}:send_in1_to_mono_aux_${aux})\npress -20dB`,
+			`CH 1>AUX ${aux}\n$(${label}:send_in1_to_mono_aux_${aux})\npress -20dB`,
 			0,
 			aux - 1,
 			AMBER,
@@ -905,7 +906,7 @@ export function GetPresetSections(inputCount: number): CompanionPresetSection<Mo
 
 export function UpdatePresets(self: ModuleInstance): void {
 	const inputCount = self.config.inputCount ?? avantisConfig.config.inputCount
-	self.setPresetDefinitions(GetPresetSections(inputCount), GetPresetDefinitions(inputCount))
+	self.setPresetDefinitions(GetPresetSections(inputCount), GetPresetDefinitions(inputCount, self.label))
 }
 
 export default UpdatePresets

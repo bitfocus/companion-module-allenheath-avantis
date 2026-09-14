@@ -70,6 +70,7 @@ Fader levels are exposed as variables, e.g. `$(avantis:fader_input_12)` or
 `$(avantis:send_in12_to_mono_aux_3)` the first time that send is used — there are too
 many source and destination combinations to declare them all up front.
 
-Replace `avantis` with your connection's name if you renamed it.
+Substitute your connection's own label for `avantis` above; the shipped dial presets
+already do this for you, using whatever the connection is actually called.
 
 > Current version: 2.0.0
