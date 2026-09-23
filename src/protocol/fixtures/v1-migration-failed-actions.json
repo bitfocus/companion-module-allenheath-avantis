@@ -1,0 +1,29 @@
+{
+	"source": "sanitized-v1-migration-fixture",
+	"actions": [
+		{
+			"definitionId": "mute_input",
+			"options": {
+				"channel": { "value": 63, "isExpression": false },
+				"mute": { "value": true, "isExpression": false }
+			},
+			"upgradeIndex": -1
+		},
+		{
+			"definitionId": "mute_input",
+			"options": {
+				"channel": { "value": 63, "isExpression": false },
+				"mute": { "value": false, "isExpression": false }
+			},
+			"upgradeIndex": -1
+		},
+		{
+			"definitionId": "fader_input",
+			"options": {
+				"channel": { "value": 63, "isExpression": false },
+				"level": { "value": 27, "isExpression": false }
+			},
+			"upgradeIndex": -1
+		}
+	]
+}

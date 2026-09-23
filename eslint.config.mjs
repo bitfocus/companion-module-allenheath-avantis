@@ -1,5 +1,7 @@
 import { generateEslintConfig } from '@companion-module/tools/eslint/config.mjs'
 
-export default generateEslintConfig({
+const config = await generateEslintConfig({
 	enableTypescript: true,
 })
+
+export default [...config, { ignores: ['dist-test/**'] }]

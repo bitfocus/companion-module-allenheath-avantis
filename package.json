@@ -1,6 +1,6 @@
 {
   "name": "allenheath-avantis",
-  "version": "2.0.2",
+  "version": "2.1.0",
   "type": "module",
   "keywords": [
     "Software",
@@ -15,6 +15,8 @@
     "build": "rimraf dist && yarn build:main && yarn build:assets",
     "build:main": "tsc -p tsconfig.build.json",
     "build:assets": "node -e \"const fs=require('node:fs'); for (const file of ['avantisconfig.json','fader.json']) fs.copyFileSync('src/'+file,'dist/'+file)\"",
+    "build:test": "rimraf dist-test && tsc -p tsconfig.test.json",
+    "test": "yarn build:test && node --test dist-test/protocol/*.spec.js",
     "dev": "tsc -p tsconfig.build.json --watch",
     "lint:raw": "eslint",
     "lint": "run lint:raw ."

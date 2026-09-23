@@ -4,7 +4,7 @@
 	"id": "allenheath-avantis",
 	"name": "allenheath-avantis",
 	"shortname": "avantis",
-	"description": "Allen & Heath Avantis Mixer",
+	"description": "Control Allen & Heath Avantis consoles running firmware 2.0 or newer",
 	"version": "0.0.0",
 	"license": "MIT",
 	"repository": "git+https://github.com/bitfocus/companion-module-allenheath-avantis.git",
@@ -24,5 +24,5 @@
 	"legacyIds": [],
 	"manufacturer": "Allen & Heath",
 	"products": ["Avantis"],
-	"keywords": []
+	"keywords": ["audio", "mixer", "console", "scene", "RackUltraFX"]
 }
