@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type net from 'node:net'
-import ModuleInstance, { getCommandReconnectDelay } from '../main.js'
+import ModuleInstance, { type AhNetStartMode, getCommandReconnectDelay } from '../main.js'
 
 type LifecycleTestInstance = ModuleInstance & {
 	initTcpCalls: boolean[]
-	initAhNetCalls: boolean[]
+	initAhNetCalls: AhNetStartMode[]
 }
 
 function createInstance(): LifecycleTestInstance {
@@ -15,8 +15,9 @@ function createInstance(): LifecycleTestInstance {
 	instance.commandReconnectAttempt = 0
 	instance.initTcpCalls = []
 	instance.initAhNetCalls = []
+	instance.inputInfoSyncTimers = []
 	instance.initTcp = (isBackgroundReconnect = false) => instance.initTcpCalls.push(isBackgroundReconnect)
-	instance.initAhNet = (isLeaseRenewal = false) => instance.initAhNetCalls.push(isLeaseRenewal)
+	instance.initAhNet = (mode = 'initial') => instance.initAhNetCalls.push(mode)
 	instance.updateStatus = () => undefined
 	instance.setConnectionVariables = () => undefined
 	instance.setCommandConnectionState = () => undefined
@@ -89,7 +90,7 @@ void describe('command connection lifecycle', () => {
 		instance.triggerAhNetReconnect()
 		context.mock.timers.tick(1000)
 		assert.deepEqual(instance.initTcpCalls, [true])
-		assert.deepEqual(instance.initAhNetCalls, [true])
+		assert.deepEqual(instance.initAhNetCalls, ['recovery'])
 	})
 
 	void it('reports recovering command state before the scheduled reboot retry', (context) => {
@@ -136,5 +137,22 @@ void describe('command connection lifecycle', () => {
 		assert.equal(getDestroyed(), false)
 		context.mock.timers.tick(10_000)
 		assert.equal(writes.length, 2)
+	})
+
+	void it('cancels a pending scene step and name requests when a command socket is retired', (context) => {
+		context.mock.timers.enable({ apis: ['setTimeout'] })
+		const instance = createInstance()
+		const { socket } = fakeCommandSocket()
+		instance.tcpSocket = socket
+		let sceneStepFired = false
+		let nameRequestFired = false
+		instance.sceneSequenceTimer = setTimeout(() => (sceneStepFired = true), 500)
+		instance.inputInfoSyncTimers = [setTimeout(() => (nameRequestFired = true), 500)]
+
+		instance.retireCommandSocket(socket)
+		context.mock.timers.tick(1000)
+		assert.equal(sceneStepFired, false)
+		assert.equal(nameRequestFired, false)
+		assert.equal(instance.sceneSequenceTimer, undefined)
 	})
 })

@@ -108,10 +108,13 @@ function buildRegistration(family: number, property: number, path: number): Buff
 	])
 }
 
-export function buildStripMetadataSyncMessages(targets: readonly StripMetadataTarget[]): Buffer[] {
+export function buildStripMetadataSyncMessages(
+	targets: readonly StripMetadataTarget[],
+	kind?: 'name' | 'color',
+): Buffer[] {
 	return targets.flatMap((target) => [
-		buildRegistration(target.family, target.nameProperty, target.namePath),
-		buildRegistration(target.family, target.colorProperty, target.colorPath),
+		...(kind !== 'color' ? [buildRegistration(target.family, target.nameProperty, target.namePath)] : []),
+		...(kind !== 'name' ? [buildRegistration(target.family, target.colorProperty, target.colorPath)] : []),
 	])
 }
 

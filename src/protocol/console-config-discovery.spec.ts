@@ -20,6 +20,7 @@ void describe('Avantis console mix configuration discovery', () => {
 		)
 		assert.equal(parseConsoleConfigManagerDiscoveryFrame(Buffer.from('f0000261ff0000000200020007f7', 'hex')), 0x0007)
 		assert.equal(parseConsoleConfigManagerDiscoveryFrame(Buffer.from('f0000561ff0000000200020007f7', 'hex')), 0x0007)
+		assert.equal(parseConsoleConfigManagerDiscoveryFrame(Buffer.from('f0000261ff0000000200020000f7', 'hex')), undefined)
 		assert.deepEqual(
 			buildConsoleMixConfigSyncMessages(0x0007).map((message) => message.toString('hex')),
 			['f00001000700030006000a000062001002100200fff7', 'f000010007620000080000f7'],

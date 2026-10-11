@@ -1,5 +1,17 @@
 export type AhNetManagerName = 'Bank Switcher Manager' | 'Scene Manager Intermediate' | 'Playback Manager'
 
+/** Scene state must be restored before lock and transport subscriptions. */
+export function nextManagerToDiscover(families: {
+	scene?: number
+	bankSwitcher?: number
+	playback?: number
+}): AhNetManagerName | undefined {
+	if (families.scene === undefined) return 'Scene Manager Intermediate'
+	if (families.bankSwitcher === undefined) return 'Bank Switcher Manager'
+	if (families.playback === undefined) return 'Playback Manager'
+	return undefined
+}
+
 function managerDiscoveryHandle(name: AhNetManagerName): number {
 	if (name === 'Scene Manager Intermediate') return 0x000f
 	if (name === 'Playback Manager') return 0x02d0

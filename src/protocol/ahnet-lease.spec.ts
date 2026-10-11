@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type net from 'node:net'
-import ModuleInstance, { getAhNetReconnectDelay } from '../main.js'
+import ModuleInstance, { type AhNetStartMode, getAhNetReconnectDelay } from '../main.js'
 
 type LeaseTestInstance = ModuleInstance & {
-	initAhNetCalls: boolean[]
+	initAhNetCalls: AhNetStartMode[]
 }
 
 function createInstance(): LeaseTestInstance {
@@ -20,9 +20,15 @@ function createInstance(): LeaseTestInstance {
 		destroyed: false,
 	} as net.Socket
 	instance.initAhNetCalls = []
-	instance.initAhNet = (isLeaseRenewal = false) => {
-		instance.initAhNetCalls.push(isLeaseRenewal)
+	instance.initAhNet = (mode = 'initial') => {
+		instance.initAhNetCalls.push(mode)
 	}
+	instance.ufxBypassStates = Array.from({ length: 8 })
+	instance.ufxPluginBypassStates = Array.from({ length: 8 })
+	instance.stateVerificationTimers = []
+	instance.heldAhNetCommands = []
+	instance.setVariableValues = () => undefined
+	instance.checkFeedbacks = () => undefined
 	instance.log = () => undefined
 	instance.setSynchronizationConnectionState = () => undefined
 	return instance
@@ -44,7 +50,7 @@ void describe('AH-Net lease renewal lifecycle', () => {
 		context.mock.timers.tick(23_999)
 		assert.deepEqual(instance.initAhNetCalls, [])
 		context.mock.timers.tick(1)
-		assert.deepEqual(instance.initAhNetCalls, [true])
+		assert.deepEqual(instance.initAhNetCalls, ['renewal'])
 		assert.equal(instance.ahNetLeaseRenewalTimer, undefined)
 	})
 
@@ -108,7 +114,7 @@ void describe('AH-Net lease renewal lifecycle', () => {
 
 		instance.triggerAhNetReconnect()
 		context.mock.timers.tick(1000)
-		assert.deepEqual(instance.initAhNetCalls, [true])
+		assert.deepEqual(instance.initAhNetCalls, ['recovery'])
 	})
 
 	void it('keeps a single AH-Net retry pending across repeated outage signals', (context) => {
@@ -121,7 +127,7 @@ void describe('AH-Net lease renewal lifecycle', () => {
 		context.mock.timers.tick(999)
 		assert.deepEqual(instance.initAhNetCalls, [])
 		context.mock.timers.tick(1)
-		assert.deepEqual(instance.initAhNetCalls, [true])
+		assert.deepEqual(instance.initAhNetCalls, ['recovery'])
 	})
 
 	void it('resets reconnect backoff after a valid session response', (context) => {
@@ -137,7 +143,7 @@ void describe('AH-Net lease renewal lifecycle', () => {
 		context.mock.timers.tick(999)
 		assert.deepEqual(instance.initAhNetCalls, [])
 		context.mock.timers.tick(1)
-		assert.deepEqual(instance.initAhNetCalls, [true])
+		assert.deepEqual(instance.initAhNetCalls, ['recovery'])
 	})
 
 	void it('retires and reconnects AH-Net immediately when a current session reports an error', (context) => {
@@ -152,7 +158,7 @@ void describe('AH-Net lease renewal lifecycle', () => {
 		assert.equal(destroyed, true)
 		assert.equal(instance.ahNetSocket, undefined)
 		context.mock.timers.tick(1000)
-		assert.deepEqual(instance.initAhNetCalls, [true])
+		assert.deepEqual(instance.initAhNetCalls, ['recovery'])
 	})
 
 	void it('reports synchronization recovery before retrying a retired session', (context) => {
@@ -178,6 +184,6 @@ void describe('AH-Net lease renewal lifecycle', () => {
 		assert.equal(destroyed, true)
 		assert.equal(instance.ahNetReceiveBuffer.length, 0)
 		context.mock.timers.tick(1000)
-		assert.deepEqual(instance.initAhNetCalls, [true])
+		assert.deepEqual(instance.initAhNetCalls, ['recovery'])
 	})
 })

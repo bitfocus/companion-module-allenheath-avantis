@@ -37,6 +37,7 @@ import {
 import { buildSceneStateSyncMessages, parseSceneNameFrame, parseSceneStateFrame } from './protocol/scene-sync.js'
 import { buildSceneDirectoryNameRequest, parseSceneDirectoryNameFrame } from './protocol/scene-directory.js'
 import { parseRawMidiHex } from './protocol/raw-midi.js'
+import { faderVariableId } from './protocol/fader-variable.js'
 import { buildMmcTransportMessage } from './protocol/mmc.js'
 import {
 	buildGlobalTempoPeriodMessage,
@@ -69,8 +70,6 @@ import {
 	parseUfxGlobalControlChange,
 	UFX_GLOBAL_KEY_CHOICES,
 	UFX_GLOBAL_SCALE_CHOICES,
-	UFX_RETURN_FIRST_CHANNEL,
-	UFX_SEND_FIRST_CHANNEL,
 } from './protocol/ufx.js'
 import {
 	buildVirtualSoundcheckModeMessage,
@@ -93,7 +92,14 @@ import {
 	buildGlobalScaleSetterMessage,
 	parseGlobalKeyScaleFrame,
 } from './protocol/global-key-scale-sync.js'
-import { buildMuteGroupSyncMessages, MUTE_GROUP_COUNT, parseMuteGroupFrame } from './protocol/mute-group-sync.js'
+import { MUTE_GROUP_COUNT, parseMuteGroupFrame } from './protocol/mute-group-sync.js'
+import { buildPriorityStateSyncBatches } from './protocol/state-sync-priority.js'
+import {
+	UfxFeedbackState,
+	UFX_WRITE_FEEDBACK_GRACE_MS,
+	type UfxFeedbackTarget,
+	type UfxFeedbackValue,
+} from './protocol/ufx-feedback-state.js'
 import {
 	buildUfxBypassMessage,
 	buildUfxBypassSyncMessages,
@@ -101,7 +107,6 @@ import {
 	UFX_BYPASS_COUNT,
 } from './protocol/ufx-bypass.js'
 import {
-	buildConsoleStateSyncMessages,
 	buildMasterStripsLockSyncMessages,
 	buildUsbRecorderStateSyncMessages,
 	parseConsoleStateFrame,
@@ -134,9 +139,9 @@ import {
 import {
 	buildManagerIdentificationRequest,
 	parseManagerIdentificationFrame,
+	nextManagerToDiscover,
 	type AhNetManagerName,
 } from './protocol/manager-discovery.js'
-import { buildManagerSessionSyncMessages } from './protocol/manager-session-sync.js'
 import {
 	buildConsoleConfigManagerDiscoveryMessage,
 	buildConsoleMixConfigSyncMessages,
@@ -179,6 +184,10 @@ const COMMAND_HEALTH_PROBE_TIMEOUT_MS = 5000
 // below this limit). Do not allow a damaged stream without an F7 terminator to
 // retain unbounded memory.
 const MAX_AHNET_INCOMPLETE_FRAME_BYTES = 64 * 1024
+// Commands pressed during a routine AH-Net lease renewal are held briefly and
+// sent once the new session is acknowledged, instead of being dropped.
+const MAX_HELD_AHNET_COMMANDS = 32
+const HELD_AHNET_COMMAND_MAX_AGE_MS = 2500
 const SysExHeader = [0xf0, 0x00, 0x00, 0x1a, 0x50, 0x10, 0x01, 0x00]
 const configFields = GetConfigFields()
 
@@ -215,6 +224,9 @@ type PendingSceneSequence = {
 	notBeforeConnection: number
 }
 
+/** initial: first start; renewal: routine 24 s lease renewal; recovery: reconnect after a lost session. */
+export type AhNetStartMode = 'initial' | 'renewal' | 'recovery'
+
 export type ConnectionLifecycleState =
 	| 'Disabled'
 	| 'Offline'
@@ -240,6 +252,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	ahNetSocket?: net.Socket
 	ahNetReceiveBuffer = Buffer.alloc(0)
 	ahNetSessionInitialized = false
+	ahNetSceneStateReceived = false
 	pendingAhNetSessionStart?: () => void
 	ahNetSessionTimer?: NodeJS.Timeout
 	ahNetLeaseRenewalTimer?: NodeJS.Timeout
@@ -247,6 +260,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	commandHealthProbeTimeout?: NodeJS.Timeout
 	commandHealthProbeSocket?: net.Socket
 	stateVerificationTimers: NodeJS.Timeout[] = []
+	ahNetRenewalInProgress = false
+	heldAhNetCommands: Array<{ command: Buffer; description: string; heldAt: number; onDrop?: () => void }> = []
+	ahNetSessionMode: AhNetStartMode = 'initial'
+	ahNetSceneDirectoryStartTimer?: NodeJS.Timeout
 	faderLevelCache: Record<string, number> = {}
 	muteStateCache: Record<string, boolean> = {}
 	faderFadeTimers: Record<string, NodeJS.Timeout[]> = {}
@@ -266,6 +283,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	virtualSoundcheckModeValue?: VirtualSoundcheckMode
 	ufxGlobalKey?: number
 	ufxGlobalScale?: number
+	ufxFeedbackState?: UfxFeedbackState
+	ufxWriteFeedbackTimers?: Map<UfxFeedbackTarget, NodeJS.Timeout>
 	reconnectTimer?: NodeJS.Timeout
 	commandOnline?: boolean
 	commandConnectionStatus?: string
@@ -403,8 +422,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		if (!this.connectionLifecycleActive) return
 		this.clearFaderFadeTimers()
 		this.clearReconnectTimer()
-		this.clearInputInfoSyncTimers()
-		this.clearCommandHealthMonitor()
+		this.clearCommandSessionTimers()
 		this.midiSysexBuffer = Buffer.alloc(0)
 		this.midiReceiveBuffer = Buffer.alloc(0)
 		this.incomingRunningStatus = 0
@@ -457,7 +475,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				this.clearReconnectTimer()
 				// A working command connection is a useful opportunity to restore an
 				// unavailable AH-Net session without waiting for its current backoff.
-				if (!this.ahNetSocket) this.initAhNet()
+				if (!this.ahNetSocket) this.initAhNet(this.ahNetReconnectTimer ? 'recovery' : 'initial')
 				this.processSceneQueue()
 				this.scheduleCommandHealthProbe(socket)
 			})
@@ -465,15 +483,13 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			socket.on('close', () => {
 				if (this.tcpSocket !== socket) return
 				delete this.tcpSocket
-				this.clearSceneSequenceTimer()
-				this.clearInputInfoSyncTimers()
-				this.clearCommandHealthMonitor()
+				this.clearCommandSessionTimers()
 				this.handleCommandConnectionUnavailable()
 			})
 
 			socket.on('data', (data: Buffer) => {
 				if (this.tcpSocket !== socket) return
-				this.validateResponseData(data)
+				this.handleCommandData(data)
 			})
 		} else {
 			this.setCommandConnectionState('Offline')
@@ -529,9 +545,21 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.scheduleCommandHealthProbe(socket)
 	}
 
+	/**
+	 * Clears timers bound to one command connection. Every teardown path (close,
+	 * retire, re-init) uses this so no scene step, name request or health probe
+	 * from a retired connection fires on its replacement. Fades are deliberately
+	 * kept: a brief outage should not leave a fader stopped halfway.
+	 */
+	clearCommandSessionTimers(): void {
+		this.clearSceneSequenceTimer()
+		this.clearInputInfoSyncTimers()
+		this.clearCommandHealthMonitor()
+	}
+
 	retireCommandSocket(socket: net.Socket): void {
 		if (this.tcpSocket !== socket) return
-		this.clearCommandHealthMonitor()
+		this.clearCommandSessionTimers()
 		delete this.tcpSocket
 		socket.destroy()
 		this.handleCommandConnectionUnavailable()
@@ -719,6 +747,52 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		for (let unit = 1; unit <= UFX_BYPASS_COUNT; unit++) this.setUfxBypassState(unit, undefined)
 	}
 
+	getUfxFeedbackState(): UfxFeedbackState {
+		return (this.ufxFeedbackState ??= new UfxFeedbackState())
+	}
+
+	setUfxFeedbackValue(target: UfxFeedbackTarget, value: UfxFeedbackValue): void {
+		if (target === 'key' && typeof value === 'number') this.setUfxGlobalKey(value)
+		else if (target === 'scale' && typeof value === 'number') this.setUfxGlobalScale(value)
+		else if (target.startsWith('rack:') && typeof value === 'boolean') {
+			this.setUfxBypassState(Number(target.slice(5)), value)
+		} else if (target.startsWith('plugin:') && typeof value === 'boolean') {
+			this.setUfxPluginBypassState(Number(target.slice(7)), value)
+		}
+	}
+
+	receiveUfxFeedback(target: UfxFeedbackTarget, value: UfxFeedbackValue): void {
+		if (this.getUfxFeedbackState().receive(target, value, Date.now())) this.setUfxFeedbackValue(target, value)
+	}
+
+	publishUfxWriteFeedback(target: UfxFeedbackTarget, value: UfxFeedbackValue, request: Buffer): void {
+		const state = this.getUfxFeedbackState()
+		const write = state.expect(target, value, Date.now())
+		this.setUfxFeedbackValue(target, value)
+		this.scheduleStateVerification([request])
+		const timers = (this.ufxWriteFeedbackTimers ??= new Map())
+		const previous = timers.get(target)
+		if (previous) clearTimeout(previous)
+		const socket = this.ahNetSocket
+		const timer = setTimeout(() => {
+			timers.delete(target)
+			if (this.ahNetSocket !== socket || socket?.destroyed) return
+			const result = state.finish(target, write)
+			if (!result) return
+			// A manual console change or rejected command must win once the grace period
+			// ends. Ask again so a deferred snapshot cannot leave the display stale.
+			if (result.deferred !== undefined) this.setUfxFeedbackValue(target, result.deferred)
+			this.writeAhNetCommand(request, 'verify RackUltraFX state after write grace period')
+		}, UFX_WRITE_FEEDBACK_GRACE_MS)
+		timers.set(target, timer)
+	}
+
+	clearUfxWriteFeedback(): void {
+		for (const timer of this.ufxWriteFeedbackTimers?.values() ?? []) clearTimeout(timer)
+		this.ufxWriteFeedbackTimers?.clear()
+		this.ufxFeedbackState?.resetSession()
+	}
+
 	setUfxPluginBypassState(unit: number, bypassed?: boolean): void {
 		if (!Number.isInteger(unit) || unit < 1 || unit > UFX_PLUGIN_BYPASS_COUNT) return
 		this.ufxPluginBypassStates[unit - 1] = bypassed
@@ -742,10 +816,12 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.ufxBypassSyncTimer = setTimeout(() => {
 			delete this.ufxBypassSyncTimer
 			if (this.ahNetSocket !== socket || socket.destroyed) return
-			if (this.ufxBypassStates.some((state) => state === undefined)) {
+			if (this.ufxBypassStates.some((_, index) => !this.getUfxFeedbackState().hasReceived(`rack:${index + 1}`))) {
 				for (const message of buildUfxBypassSyncMessages()) socket.write(message)
 			}
-			if (this.ufxPluginBypassStates.some((state) => state === undefined)) {
+			if (
+				this.ufxPluginBypassStates.some((_, index) => !this.getUfxFeedbackState().hasReceived(`plugin:${index + 1}`))
+			) {
 				for (const message of buildUfxPluginBypassSyncMessages()) socket.write(message)
 			}
 			this.ufxBypassSyncTimer = setTimeout(() => {
@@ -798,7 +874,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	sendUfxBypassCommands(commands: Array<{ unit: number; bypassed: boolean }>): void {
-		if (!this.isAhNetConnectionReady()) {
+		if (!this.isAhNetCommandAvailable()) {
 			this.log('warn', 'Cannot change RackUltraFX bypass because console synchronization is not connected')
 			return
 		}
@@ -812,12 +888,11 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			this.log('error', error instanceof Error ? error.message : String(error))
 			return
 		}
+		const sync = buildUfxBypassSyncMessages()
 		for (const command of messages) {
 			if (!this.writeAhNetCommand(command.message, 'change RackUltraFX bypass')) return
-			this.setUfxBypassState(command.unit, command.bypassed)
+			this.publishUfxWriteFeedback(`rack:${command.unit}`, command.bypassed, sync[(command.unit - 1) * 2 + 1])
 		}
-		const sync = buildUfxBypassSyncMessages()
-		this.scheduleStateVerification(messages.flatMap((command) => [sync[(command.unit - 1) * 2 + 1]]))
 	}
 
 	setAllUfxBypass(mode: 'bypass' | 'enable' | 'toggle'): void {
@@ -826,28 +901,26 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	setUfxPluginBypass(unit: number, bypassed: boolean): void {
-		if (!this.isAhNetConnectionReady()) {
+		if (!this.isAhNetCommandAvailable()) {
 			this.log('warn', 'Cannot change UFX plugin bypass because console synchronization is not connected')
 			return
 		}
 		if (!this.writeAhNetCommand(buildUfxPluginBypassMessage(unit, bypassed), 'change UFX plugin bypass')) return
-		this.setUfxPluginBypassState(unit, bypassed)
-		this.scheduleStateVerification([buildUfxPluginBypassSyncMessages()[(unit - 1) * 2 + 1]])
+		this.publishUfxWriteFeedback(`plugin:${unit}`, bypassed, buildUfxPluginBypassSyncMessages()[(unit - 1) * 2 + 1])
 	}
 
 	setAllUfxPluginBypass(mode: 'bypass' | 'enable' | 'toggle'): void {
-		if (!this.isAhNetConnectionReady()) {
+		if (!this.isAhNetCommandAvailable()) {
 			this.log('warn', 'Cannot change UFX plugin bypass because console synchronization is not connected')
 			return
 		}
 		const bypassed =
 			mode === 'bypass' || (mode === 'toggle' && !this.ufxPluginBypassStates.every((state) => state === true))
+		const sync = buildUfxPluginBypassSyncMessages()
 		for (let unit = 1; unit <= UFX_PLUGIN_BYPASS_COUNT; unit++) {
 			if (!this.writeAhNetCommand(buildUfxPluginBypassMessage(unit, bypassed), 'change UFX plugin bypass')) return
-			this.setUfxPluginBypassState(unit, bypassed)
+			this.publishUfxWriteFeedback(`plugin:${unit}`, bypassed, sync[(unit - 1) * 2 + 1])
 		}
-		const sync = buildUfxPluginBypassSyncMessages()
-		this.scheduleStateVerification(Array.from({ length: UFX_PLUGIN_BYPASS_COUNT }, (_, unit) => sync[unit * 2 + 1]))
 	}
 
 	setVirtualSoundcheckMode(mode?: VirtualSoundcheckMode): void {
@@ -858,6 +931,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	destroyAhNetConnection(markUnknown: boolean, preserveDiscovery = false): void {
+		this.dropHeldAhNetCommands('console synchronization was restarted')
 		this.clearAhNetLeaseRenewalTimer()
 		this.clearStateVerificationTimers()
 		this.clearSceneDirectorySync()
@@ -869,6 +943,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		}
 		this.ahNetReceiveBuffer = Buffer.alloc(0)
 		this.ahNetSessionInitialized = false
+		this.ahNetSceneStateReceived = false
+		this.clearUfxWriteFeedback()
 		delete this.pendingAhNetSessionStart
 		if (this.ahNetSessionTimer) clearTimeout(this.ahNetSessionTimer)
 		delete this.ahNetSessionTimer
@@ -881,7 +957,13 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		}
 		this.clearAhNetSyncTimer()
 		if (!this.connectionLifecycleActive) this.setSynchronizationConnectionState('Offline')
-		if (markUnknown) this.setVirtualSoundcheckMode(undefined)
+		if (markUnknown) {
+			this.setVirtualSoundcheckMode(undefined)
+			this.setUfxGlobalKey(undefined)
+			this.setUfxGlobalScale(undefined)
+			this.setUfxBypassStatesUnknown()
+			this.setUfxPluginBypassStatesUnknown()
+		}
 	}
 
 	shouldMaintainAhNetConnection(): boolean {
@@ -896,10 +978,23 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	retireAhNetSocket(socket: net.Socket): void {
 		if (this.ahNetSocket !== socket) return
 		delete this.ahNetSocket
+		this.dropHeldAhNetCommands('the console synchronization connection was lost')
 		this.ahNetReceiveBuffer = Buffer.alloc(0)
 		this.ahNetSessionInitialized = false
+		this.ahNetSceneStateReceived = false
+		this.clearUfxWriteFeedback()
 		delete this.pendingAhNetSessionStart
 		this.clearAhNetLeaseRenewalTimer()
+		this.clearStateVerificationTimers()
+		// Values only AH-Net reports must not look live during an outage. Mute groups
+		// and faders stay: MIDI/TCP keeps reporting them independently.
+		this.setUfxGlobalKey(undefined)
+		this.setUfxGlobalScale(undefined)
+		this.setUfxBypassStatesUnknown()
+		this.setUfxPluginBypassStatesUnknown()
+		this.setConsoleStateUnknown()
+		this.setUsbPlaybackUnknown()
+		this.setGlobalTempoUnknown()
 		if (this.ahNetSessionTimer) clearTimeout(this.ahNetSessionTimer)
 		delete this.ahNetSessionTimer
 		this.clearAhNetSyncTimer()
@@ -912,7 +1007,13 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	sendVirtualSoundcheckMode(mode: VirtualSoundcheckMode): void {
-		if (!this.writeAhNetCommand(buildVirtualSoundcheckModeMessage(mode), 'set Virtual Soundcheck mode')) return
+		const previous = this.virtualSoundcheckModeValue
+		if (
+			!this.writeAhNetCommand(buildVirtualSoundcheckModeMessage(mode), 'set Virtual Soundcheck mode', () =>
+				this.setVirtualSoundcheckMode(previous),
+			)
+		)
+			return
 		this.setVirtualSoundcheckMode(mode)
 		this.scheduleStateVerification([buildVirtualSoundcheckValueRequest()])
 	}
@@ -960,23 +1061,43 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.setVariableValues({ global_tempo_bpm: this.globalTempoBpm })
 	}
 
+	setGlobalTempoUnknown(): void {
+		delete this.globalTempoBpm
+		this.setVariableValues({ global_tempo_bpm: 'Unknown' })
+	}
+
 	sendGlobalTempoMessage(message: Buffer, bpm: number): void {
-		if (!this.writeAhNetCommand(message, `set Global Tempo to ${bpm.toFixed(1)} BPM`)) return
+		const previous = this.globalTempoBpm
+		const restore = () => {
+			if (previous === undefined) this.setGlobalTempoUnknown()
+			else {
+				this.globalTempoBpm = previous
+				this.setVariableValues({ global_tempo_bpm: previous })
+			}
+		}
+		if (!this.writeAhNetCommand(message, `set Global Tempo to ${bpm.toFixed(1)} BPM`, restore)) return
 		this.globalTempoBpm = Number(bpm.toFixed(1))
 		this.setVariableValues({ global_tempo_bpm: this.globalTempoBpm })
 		this.scheduleStateVerification([buildGlobalTempoSyncMessages()[1]])
 	}
 
-	initAhNet(isLeaseRenewal = false): void {
+	initAhNet(mode: AhNetStartMode = 'initial'): void {
 		if (!this.connectionLifecycleActive) return
+		const isLeaseRenewal = mode === 'renewal'
 		this.clearAhNetReconnectTimer()
-		this.destroyAhNetConnection(false, isLeaseRenewal)
+		// Renewal and recovery keep the discovered manager families (validated in RC12
+		// power-loss recovery); only a first start rediscovers them.
+		this.destroyAhNetConnection(false, mode !== 'initial')
+		this.ahNetRenewalInProgress = isLeaseRenewal
+		this.ahNetSessionMode = mode
 		this.ahNetFaderChannelsByHandle.clear()
 		this.ahNetConsoleFadersByHandle.clear()
 		this.pendingInitialFaderSync.clear()
 		this.pendingInitialConsoleFaderSync.clear()
 		this.initialFaderSyncRetryCount = 0
-		if (!isLeaseRenewal) {
+		if (mode === 'initial') {
+			this.setUfxGlobalKey(undefined)
+			this.setUfxGlobalScale(undefined)
 			this.setMuteGroupsUnknown()
 			this.setUfxBypassStatesUnknown()
 			this.setUfxPluginBypassStatesUnknown()
@@ -985,6 +1106,13 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			delete this.slinkManagerFamily
 			this.setConsoleStateUnknown()
 			this.setUsbPlaybackUnknown()
+			this.setFirmwareUnknown()
+		} else if (mode === 'recovery') {
+			// The console may have rebooted (possibly into new firmware or with changed
+			// hardware), so rediscover hardware and firmware like a first start.
+			this.ioPortInstalled.fill(undefined)
+			this.slinkRackConnected.fill(undefined)
+			delete this.slinkManagerFamily
 			this.setFirmwareUnknown()
 		}
 
@@ -1015,12 +1143,17 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.stripMetadataTargets = buildStripMetadataTargetMap(stripMetadataTargets)
 		const needsConnection = this.shouldMaintainAhNetConnection()
 		if (!needsConnection || !this.config.host) {
+			this.ahNetRenewalInProgress = false
 			this.setSynchronizationConnectionState(this.config.host ? 'Disabled' : 'Offline')
 			this.setFaderSyncStatus(this.subscribedInputFaders.length === 0 ? 'Disabled' : 'Error: Console IP is missing')
 			return
 		}
-		this.setSynchronizationConnectionState('Connecting')
-		this.setFaderSyncStatus(this.subscribedInputFaders.length > 0 ? 'Connecting' : 'Disabled')
+		// A routine renewal keeps the published state steady so triggers and feedback
+		// keyed on these variables do not flicker every 24 seconds.
+		if (!isLeaseRenewal) {
+			this.setSynchronizationConnectionState('Connecting')
+			this.setFaderSyncStatus(this.subscribedInputFaders.length > 0 ? 'Connecting' : 'Disabled')
+		}
 		const socket = net.createConnection({ host: this.config.host, port: AHNET_PORT })
 		socket.setTimeout(CONNECTION_ATTEMPT_TIMEOUT_MS, () => {
 			if (this.ahNetSocket !== socket || socket.destroyed || socket.readyState === 'open') return
@@ -1037,10 +1170,13 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			this.pendingAhNetSessionStart = () => {
 				if (this.ahNetSocket !== socket || socket.destroyed) return
 				delete this.pendingAhNetSessionStart
-				this.setSynchronizationConnectionState('Synchronizing')
+				this.ahNetRenewalInProgress = false
+				this.flushHeldAhNetCommands(socket)
+				if (!isLeaseRenewal) this.setSynchronizationConnectionState('Synchronizing')
 				this.scheduleAhNetLeaseRenewal(socket)
 				if (this.ahNetSessionTimer) clearTimeout(this.ahNetSessionTimer)
 				delete this.ahNetSessionTimer
+				if (syncState) this.requestNextAhNetManagerDiscovery(socket)
 				if (!this.consoleDiscoverySettled) {
 					socket.write(buildConsoleConfigManagerDiscoveryMessage())
 					socket.write(buildDPackCapabilityDiscoveryMessage())
@@ -1064,40 +1200,27 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 						}
 					}, 1500)
 				}
-				if (syncState && this.ahNetBankSwitcherFamily === undefined) {
-					this.requestAhNetManagerDiscovery(socket, 'Bank Switcher Manager')
-				}
 				let nextInitialSyncDelay = 75
-				if (syncState || this.virtualSoundcheckModeValue !== undefined) {
+				const syncBatches = buildPriorityStateSyncBatches({
+					syncState,
+					syncUfx: syncGlobalKeyScale,
+					syncVirtualSoundcheck: syncState || this.virtualSoundcheckModeValue !== undefined,
+					managers: {
+						bankSwitcher: this.ahNetBankSwitcherFamily,
+						scene: this.ahNetSceneManagerFamily,
+						playback: this.ahNetPlaybackManagerFamily,
+					},
+				})
+				for (const batch of syncBatches) {
 					nextInitialSyncDelay = this.scheduleAhNetMessages(
 						socket,
-						[buildVirtualSoundcheckRegistrationMessage(), buildVirtualSoundcheckValueRequest()],
+						batch.messages,
 						nextInitialSyncDelay,
+						batch.interval,
 					)
+					if (batch.kind === 'ufx') this.scheduleUfxBypassSyncValidation(socket, nextInitialSyncDelay + 250)
 				}
 				if (syncState) {
-					nextInitialSyncDelay = this.scheduleAhNetMessages(
-						socket,
-						[...buildGlobalTempoSyncMessages(), ...buildMuteGroupSyncMessages(), ...buildConsoleStateSyncMessages()],
-						nextInitialSyncDelay,
-					)
-					// These registrations are scoped to the current AH-Net session. Manager
-					// addresses survive graceful lease renewal, but their subscriptions do not.
-					nextInitialSyncDelay = this.scheduleAhNetMessages(
-						socket,
-						buildManagerSessionSyncMessages({
-							bankSwitcher: this.ahNetBankSwitcherFamily,
-							scene: this.ahNetSceneManagerFamily,
-							playback: this.ahNetPlaybackManagerFamily,
-						}),
-						nextInitialSyncDelay,
-					)
-					nextInitialSyncDelay = this.scheduleAhNetMessages(
-						socket,
-						buildStripMetadataSyncMessages(stripMetadataTargets),
-						nextInitialSyncDelay,
-						2,
-					)
 					for (const delay of [250, 1000]) {
 						setTimeout(() => {
 							if (this.ahNetSocket !== socket || socket.destroyed || this.firmwareVersion !== undefined) return
@@ -1109,27 +1232,16 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 						}, delay + 100)
 					}
 				}
-				if (syncGlobalKeyScale) {
-					nextInitialSyncDelay = this.scheduleAhNetMessages(
-						socket,
-						[
-							...buildGlobalKeyScaleSyncMessages(),
-							...buildUfxBypassSyncMessages(),
-							...buildUfxPluginBypassSyncMessages(),
-						],
-						nextInitialSyncDelay,
-					)
-					this.scheduleUfxBypassSyncValidation(socket, nextInitialSyncDelay + 250)
-				}
 				if (syncState || syncGlobalKeyScale || this.virtualSoundcheckModeValue !== undefined) {
 					this.scheduleInitialStateRetries(socket, syncState, syncGlobalKeyScale)
 				}
 
+				let metadataSyncStartDelay = nextInitialSyncDelay
 				if (this.subscribedInputFaders.length > 0) {
 					const faderSyncStartDelay = Math.max(250, nextInitialSyncDelay + 25)
 					this.pendingInitialFaderSync = new Set(this.subscribedInputFaders)
 					this.pendingInitialConsoleFaderSync = new Set(consoleFaderTargets.map((target) => target.variableId))
-					this.setFaderSyncStatus('Synchronizing')
+					if (!isLeaseRenewal) this.setFaderSyncStatus('Synchronizing')
 					this.subscribedInputFaders.forEach((channel, index) => {
 						setTimeout(
 							() => {
@@ -1150,14 +1262,26 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 					})
 					const faderRequestEndDelay =
 						faderSyncStartDelay + (this.subscribedInputFaders.length + consoleFaderTargets.length) * 5
-					if (!isLeaseRenewal) {
-						this.inputInfoSyncTimers.push(
-							setTimeout(() => this.scheduleSceneDirectorySync(), faderRequestEndDelay + 250),
-						)
-					}
+					metadataSyncStartDelay = faderRequestEndDelay + 25
+					if (!isLeaseRenewal) this.startSceneDirectorySyncAfter(faderRequestEndDelay + 250)
 					this.scheduleInitialFaderSyncTimeout(socket, consoleFaderTargets)
 				} else if (syncState && !isLeaseRenewal) {
-					this.inputInfoSyncTimers.push(setTimeout(() => this.scheduleSceneDirectorySync(), 750))
+					this.startSceneDirectorySyncAfter(750)
+				}
+				// Strip names and colours follow operational state and fader subscriptions.
+				if (syncState) {
+					const colorSyncStartDelay = this.scheduleAhNetMessages(
+						socket,
+						buildStripMetadataSyncMessages(stripMetadataTargets, 'name'),
+						metadataSyncStartDelay,
+						2,
+					)
+					this.scheduleAhNetMessages(
+						socket,
+						buildStripMetadataSyncMessages(stripMetadataTargets, 'color'),
+						colorSyncStartDelay,
+						2,
+					)
 				}
 				if (this.subscribedInputFaders.length === 0) this.setSynchronizationConnectionState('Ready')
 			}
@@ -1172,7 +1296,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				socket.destroy(new Error('AH-Net control session initialization timed out'))
 			}, 2000)
 		})
-		socket.on('data', (data) => this.processAhNetData(data))
+		socket.on('data', (data) => this.handleAhNetData(socket, data))
 		socket.once('error', (error) => {
 			if (this.ahNetSocket !== socket) return
 			this.log('warn', `AH-Net synchronization error: ${error.message}`)
@@ -1200,7 +1324,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			)
 				return
 			this.log('debug', 'Renewing AH-Net synchronization session')
-			this.initAhNet(true)
+			this.initAhNet('renewal')
 		}, 24000)
 	}
 
@@ -1213,6 +1337,19 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		if (this.ahNetSocket !== socket || socket.destroyed) return
 		this.pendingAhNetManagerDiscovery = name
 		socket.write(buildManagerIdentificationRequest(name))
+	}
+
+	getNextAhNetManagerDiscovery(): AhNetManagerName | undefined {
+		return nextManagerToDiscover({
+			scene: this.ahNetSceneManagerFamily,
+			bankSwitcher: this.ahNetBankSwitcherFamily,
+			playback: this.ahNetPlaybackManagerFamily,
+		})
+	}
+
+	requestNextAhNetManagerDiscovery(socket: net.Socket): void {
+		const name = this.pendingAhNetManagerDiscovery ?? this.getNextAhNetManagerDiscovery()
+		if (name) this.requestAhNetManagerDiscovery(socket, name)
 	}
 
 	scheduleAhNetMessages(socket: net.Socket, messages: Buffer[], startDelay: number, interval = 15): number {
@@ -1234,11 +1371,17 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				if (this.ahNetSocket !== socket || socket.destroyed) return
 
 				const messages: Buffer[] = []
+				if (syncState && !this.ahNetSceneStateReceived && this.ahNetSceneManagerFamily !== undefined) {
+					messages.push(...buildSceneStateSyncMessages(this.ahNetSceneManagerFamily))
+				}
 				if (this.virtualSoundcheckModeValue === undefined) {
 					messages.push(buildVirtualSoundcheckRegistrationMessage(), buildVirtualSoundcheckValueRequest())
 				}
-				if (syncGlobalKeyScale && (this.ufxGlobalKey === undefined || this.ufxGlobalScale === undefined)) {
-					messages.push(...buildGlobalKeyScaleSyncMessages())
+				if (syncGlobalKeyScale) {
+					const state = this.getUfxFeedbackState()
+					const sync = buildGlobalKeyScaleSyncMessages()
+					if (!state.hasReceived('key')) messages.push(...sync.slice(0, 2))
+					if (!state.hasReceived('scale')) messages.push(...sync.slice(2, 4))
 				}
 
 				if (syncState) {
@@ -1248,9 +1391,6 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 					}
 					if (this.masterStripsLocked === undefined && this.ahNetBankSwitcherFamily !== undefined) {
 						messages.push(...buildMasterStripsLockSyncMessages(this.ahNetBankSwitcherFamily))
-					}
-					if (this.lastSceneNumber <= 0 && this.ahNetSceneManagerFamily !== undefined) {
-						messages.push(...buildSceneStateSyncMessages(this.ahNetSceneManagerFamily))
 					}
 					if (
 						(this.usbPlaybackState === undefined || this.usbRecorderRecording === undefined) &&
@@ -1262,17 +1402,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 						)
 					}
 
-					if (this.pendingAhNetManagerDiscovery) {
-						messages.push(buildManagerIdentificationRequest(this.pendingAhNetManagerDiscovery))
-					} else if (this.ahNetBankSwitcherFamily === undefined) {
-						this.pendingAhNetManagerDiscovery = 'Bank Switcher Manager'
-						messages.push(buildManagerIdentificationRequest(this.pendingAhNetManagerDiscovery))
-					} else if (this.ahNetSceneManagerFamily === undefined) {
-						this.pendingAhNetManagerDiscovery = 'Scene Manager Intermediate'
-						messages.push(buildManagerIdentificationRequest(this.pendingAhNetManagerDiscovery))
-					} else if (this.ahNetPlaybackManagerFamily === undefined) {
-						this.pendingAhNetManagerDiscovery = 'Playback Manager'
-						messages.push(buildManagerIdentificationRequest(this.pendingAhNetManagerDiscovery))
+					const manager = this.pendingAhNetManagerDiscovery ?? this.getNextAhNetManagerDiscovery()
+					if (manager) {
+						this.pendingAhNetManagerDiscovery = manager
+						messages.unshift(buildManagerIdentificationRequest(manager))
 					}
 				}
 
@@ -1281,7 +1414,18 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		}
 	}
 
+	/** Starts the scene-name directory read on the AH-Net session, independent of the command connection. */
+	startSceneDirectorySyncAfter(delay: number): void {
+		if (this.ahNetSceneDirectoryStartTimer) clearTimeout(this.ahNetSceneDirectoryStartTimer)
+		this.ahNetSceneDirectoryStartTimer = setTimeout(() => {
+			delete this.ahNetSceneDirectoryStartTimer
+			this.scheduleSceneDirectorySync()
+		}, delay)
+	}
+
 	clearSceneDirectorySync(): void {
+		if (this.ahNetSceneDirectoryStartTimer) clearTimeout(this.ahNetSceneDirectoryStartTimer)
+		delete this.ahNetSceneDirectoryStartTimer
 		if (this.sceneDirectoryTimer) clearTimeout(this.sceneDirectoryTimer)
 		if (this.sceneDirectoryResponseTimer) clearTimeout(this.sceneDirectoryResponseTimer)
 		delete this.sceneDirectoryTimer
@@ -1453,9 +1597,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			this.initialFaderSyncRetryCount++
 			const totalCount = this.subscribedInputFaders.length + consoleFaderTargets.length
 			const syncedCount = totalCount - missingCount
-			this.setFaderSyncStatus(
-				`Synchronizing (${syncedCount}/${totalCount}, retry ${this.initialFaderSyncRetryCount}/8)`,
-			)
+			if (this.ahNetSessionMode !== 'renewal')
+				this.setFaderSyncStatus(
+					`Synchronizing (${syncedCount}/${totalCount}, retry ${this.initialFaderSyncRetryCount}/8)`,
+				)
 			let requestIndex = 0
 			for (const channel of this.pendingInitialFaderSync) {
 				setTimeout(() => {
@@ -1565,7 +1710,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.ahNetReconnectTimer = setTimeout(() => {
 			delete this.ahNetReconnectTimer
 			this.log('debug', `Attempting to reconnect AH-Net synchronization after ${delay / 1000}s backoff...`)
-			this.initAhNet(true)
+			this.initAhNet('recovery')
 		}, delay)
 	}
 
@@ -1640,8 +1785,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			if (mode !== undefined) this.setVirtualSoundcheckMode(mode)
 
 			const globalKeyScale = parseGlobalKeyScaleFrame(frame)
-			if (globalKeyScale?.kind === 'key') this.setUfxGlobalKey(globalKeyScale.value)
-			if (globalKeyScale?.kind === 'scale') this.setUfxGlobalScale(globalKeyScale.value)
+			if (globalKeyScale) this.receiveUfxFeedback(globalKeyScale.kind, globalKeyScale.value)
 
 			const globalTempoPeriod = parseGlobalTempoFrame(frame)
 			if (globalTempoPeriod !== undefined) {
@@ -1651,7 +1795,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			const sceneNumber = this.ahNetSceneManagerFamily
 				? parseSceneStateFrame(frame, this.ahNetSceneManagerFamily)
 				: undefined
-			if (sceneNumber !== undefined) this.applySynchronizedSceneState(sceneNumber)
+			if (sceneNumber !== undefined) {
+				this.ahNetSceneStateReceived = true
+				this.applySynchronizedSceneState(sceneNumber)
+			}
 			const sceneName = this.ahNetSceneManagerFamily
 				? parseSceneNameFrame(frame, this.ahNetSceneManagerFamily)
 				: undefined
@@ -1675,9 +1822,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			if (muteGroup !== undefined) this.setMuteGroupState(muteGroup.group, muteGroup.muted)
 
 			const ufxBypass = parseUfxBypassFrame(frame)
-			if (ufxBypass !== undefined) this.setUfxBypassState(ufxBypass.unit, ufxBypass.bypassed)
+			if (ufxBypass !== undefined) this.receiveUfxFeedback(`rack:${ufxBypass.unit}`, ufxBypass.bypassed)
 			const pluginBypass = parseUfxPluginBypassFrame(frame)
-			if (pluginBypass?.kind === 'ufx-plugin') this.setUfxPluginBypassState(pluginBypass.unit, pluginBypass.bypassed)
+			if (pluginBypass?.kind === 'ufx-plugin')
+				this.receiveUfxFeedback(`plugin:${pluginBypass.unit}`, pluginBypass.bypassed)
 
 			const consoleState = parseConsoleStateFrame(frame, this.ahNetBankSwitcherFamily, this.ahNetPlaybackManagerFamily)
 			if (consoleState?.kind === 'talkback') this.setTalkbackActive(consoleState.active)
@@ -1709,14 +1857,12 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 					this.log('debug', `Discovered Bank Switcher Manager family 0x${managerFamily.toString(16)}`)
 					if (socket && !socket.destroyed) {
 						for (const message of buildMasterStripsLockSyncMessages(managerFamily)) socket.write(message)
-						this.requestAhNetManagerDiscovery(socket, 'Scene Manager Intermediate')
 					}
 				} else if (managerName === 'Scene Manager Intermediate') {
 					this.ahNetSceneManagerFamily = managerFamily
 					this.log('debug', `Discovered Surface Scene Manager family 0x${managerFamily.toString(16)}`)
 					if (socket && !socket.destroyed) {
 						for (const message of buildSceneStateSyncMessages(managerFamily)) socket.write(message)
-						this.requestAhNetManagerDiscovery(socket, 'Playback Manager')
 					}
 				} else {
 					this.ahNetPlaybackManagerFamily = managerFamily
@@ -1729,6 +1875,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 							socket.write(message)
 					}
 				}
+				if (socket && !socket.destroyed) this.requestNextAhNetManagerDiscovery(socket)
 			}
 
 			const firmware = parseFirmwareFrame(frame, this.ahNetConsoleFamily)
@@ -1759,6 +1906,34 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			this.log('debug', `Attempting to reconnect to Avantis mixer after ${delay / 1000}s backoff...`)
 			this.initTcp(true)
 		}, delay)
+	}
+
+	/** Processes command-socket data without letting a parser fault crash the module. */
+	handleCommandData(data: Buffer): void {
+		try {
+			this.validateResponseData(data)
+		} catch (error) {
+			this.log('error', `Discarded unreadable MIDI/TCP data: ${error instanceof Error ? error.message : String(error)}`)
+			this.midiSysexBuffer = Buffer.alloc(0)
+			this.midiReceiveBuffer = Buffer.alloc(0)
+			this.incomingRunningStatus = 0
+			this.nrpnMSB = {}
+			this.nrpnLSB = {}
+		}
+	}
+
+	/** Processes AH-Net data; a parser fault restarts synchronization instead of crashing the module. */
+	handleAhNetData(socket: net.Socket, data: Buffer): void {
+		if (this.ahNetSocket !== socket) return
+		try {
+			this.processAhNetData(data)
+		} catch (error) {
+			this.log(
+				'error',
+				`Discarded unreadable AH-Net data; reconnecting synchronization: ${error instanceof Error ? error.message : String(error)}`,
+			)
+			if (this.ahNetSocket === socket) this.retireAhNetSocket(socket)
+		}
 	}
 
 	validateResponseData(data: Buffer): void {
@@ -1909,9 +2084,9 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 							: undefined
 
 					if (ufxUpdate?.type === 'key') {
-						this.setUfxGlobalKey(ufxUpdate.value)
+						this.receiveUfxFeedback('key', ufxUpdate.value)
 					} else if (ufxUpdate?.type === 'scale') {
-						this.setUfxGlobalScale(ufxUpdate.value)
+						this.receiveUfxFeedback('scale', ufxUpdate.value)
 					}
 
 					if (controller === 0x63) {
@@ -1996,69 +2171,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 	updateFaderLevelVariable(midiOffset: number, channel: number, level: number): void {
 		const midiBase = (this.config.midiBase ?? 1) - 1
-		const relOffset = midiOffset - midiBase
-
-		let prefix = ''
-		let index = 1
-
-		if (relOffset === 0) {
-			prefix = 'fader_input'
-			index = channel + 1
-		} else if (relOffset === 1) {
-			if (channel >= 0x3f) {
-				prefix = 'fader_stereo_group'
-				index = channel - 0x3f + 1
-			} else {
-				prefix = 'fader_mono_group'
-				index = channel + 1
-			}
-		} else if (relOffset === 2) {
-			if (channel >= 0x3f) {
-				prefix = 'fader_stereo_aux'
-				index = channel - 0x3f + 1
-			} else {
-				prefix = 'fader_mono_aux'
-				index = channel + 1
-			}
-		} else if (relOffset === 3) {
-			if (channel >= 0x3f) {
-				prefix = 'fader_stereo_matrix'
-				index = channel - 0x3f + 1
-			} else {
-				prefix = 'fader_mono_matrix'
-				index = channel + 1
-			}
-		} else if (relOffset === 4) {
-			if (channel >= 0x35 && channel <= 0x44) {
-				prefix = 'fader_dca'
-				index = channel - 0x35 + 1
-			} else if (channel >= 0x2f && channel <= 0x31) {
-				prefix = 'fader_main'
-				index = channel - 0x2f + 1
-			} else if (channel >= 0x0f && channel <= 0x1a) {
-				prefix = 'fader_stereo_fx_send'
-				index = channel - 0x0f + 1
-			} else if (channel >= 0x1f && channel <= 0x2a) {
-				prefix = 'fader_fx_return'
-				index = channel - 0x1f + 1
-			} else if (channel < 0x0f) {
-				prefix = 'fader_mono_fx_send'
-				index = channel + 1
-			} else if (channel >= UFX_SEND_FIRST_CHANNEL && channel < UFX_RETURN_FIRST_CHANNEL) {
-				prefix = 'fader_ufx_send'
-				index = channel - UFX_SEND_FIRST_CHANNEL + 1
-			} else if (channel >= UFX_RETURN_FIRST_CHANNEL && channel < UFX_RETURN_FIRST_CHANNEL + 8) {
-				prefix = 'fader_ufx_return'
-				index = channel - UFX_RETURN_FIRST_CHANNEL + 1
-			}
-		}
-
-		if (prefix) {
-			const dbStr = faderLevelToDbMap[level] ?? '-inf'
-			this.setVariableValues({
-				[`${prefix}_${index}`]: `${dbStr} dB`,
-			})
-		}
+		const variableId = faderVariableId(midiOffset - midiBase, channel)
+		if (!variableId) return
+		const dbStr = faderLevelToDbMap[level] ?? '-inf'
+		this.setVariableValues({ [variableId]: `${dbStr} dB` })
 	}
 
 	action(action: ActionExecution): void {
@@ -2204,14 +2320,12 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				break
 			case 'ufx_global_key':
 				if (this.writeAhNetCommand(buildGlobalKeySetterMessage(Number(opt.key)), 'set RackUltraFX Global Key')) {
-					this.setUfxGlobalKey(Number(opt.key))
-					this.scheduleStateVerification([buildGlobalKeyScaleSyncMessages()[1]])
+					this.publishUfxWriteFeedback('key', Number(opt.key), buildGlobalKeyScaleSyncMessages()[1])
 				}
 				break
 			case 'ufx_global_scale':
 				if (this.writeAhNetCommand(buildGlobalScaleSetterMessage(Number(opt.scale)), 'set RackUltraFX Global Scale')) {
-					this.setUfxGlobalScale(Number(opt.scale))
-					this.scheduleStateVerification([buildGlobalKeyScaleSyncMessages()[3]])
+					this.publishUfxWriteFeedback('scale', Number(opt.scale), buildGlobalKeyScaleSyncMessages()[3])
 				}
 				break
 			case 'ufx_unit_parameter':
@@ -2283,17 +2397,22 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		}
 	}
 
-	setUfxGlobalKey(value: number): void {
-		if (!Number.isInteger(value) || value < 0 || value >= UFX_GLOBAL_KEY_CHOICES.length) return
+	setUfxGlobalKey(value?: number): void {
+		if (value !== undefined && (!Number.isInteger(value) || value < 0 || value >= UFX_GLOBAL_KEY_CHOICES.length)) return
 		this.ufxGlobalKey = value
-		this.setVariableValues({ ufx_global_key: UFX_GLOBAL_KEY_CHOICES[value]?.label ?? 'Unknown' })
+		this.setVariableValues({
+			ufx_global_key: value === undefined ? 'Unknown' : (UFX_GLOBAL_KEY_CHOICES[value]?.label ?? 'Unknown'),
+		})
 		this.checkFeedbacks('ufx_global_key')
 	}
 
-	setUfxGlobalScale(value: number): void {
-		if (!Number.isInteger(value) || value < 0 || value >= UFX_GLOBAL_SCALE_CHOICES.length) return
+	setUfxGlobalScale(value?: number): void {
+		if (value !== undefined && (!Number.isInteger(value) || value < 0 || value >= UFX_GLOBAL_SCALE_CHOICES.length))
+			return
 		this.ufxGlobalScale = value
-		this.setVariableValues({ ufx_global_scale: UFX_GLOBAL_SCALE_CHOICES[value]?.label ?? 'Unknown' })
+		this.setVariableValues({
+			ufx_global_scale: value === undefined ? 'Unknown' : (UFX_GLOBAL_SCALE_CHOICES[value]?.label ?? 'Unknown'),
+		})
 		this.checkFeedbacks('ufx_global_scale')
 	}
 
@@ -2353,6 +2472,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			return []
 		}
 
+		// An immediate set supersedes any fade still running on the same fader.
+		this.clearFaderFadeTimers(`${midiOffset}:${Number(opt.channel)}`)
 		this.sendFaderLevel(opt, midiOffset)
 		return []
 	}
@@ -2690,7 +2811,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	}
 
 	scheduleStateVerification(messages: Buffer[]): void {
-		if (messages.length === 0) return
+		// While a renewal is pending the new session's full state sync re-reads everything.
+		if (messages.length === 0 || this.ahNetRenewalInProgress) return
 		const socket = this.ahNetSocket
 		if (!socket || socket.destroyed) return
 		for (const delay of [200, 900]) {
@@ -2881,8 +3003,60 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		)
 	}
 
-	writeAhNetCommand(command: Buffer, description: string): boolean {
+	/** True when an AH-Net command can be sent now or held for the renewal in progress. */
+	isAhNetCommandAvailable(): boolean {
+		return this.isAhNetConnectionReady() || this.canHoldAhNetCommands()
+	}
+
+	canHoldAhNetCommands(): boolean {
+		return this.ahNetRenewalInProgress && this.ahNetSocket !== undefined && !this.ahNetSocket.destroyed
+	}
+
+	flushHeldAhNetCommands(socket: net.Socket): void {
+		const held = this.heldAhNetCommands
+		this.heldAhNetCommands = []
+		const now = Date.now()
+		for (const entry of held) {
+			if (now - entry.heldAt > HELD_AHNET_COMMAND_MAX_AGE_MS) {
+				this.log('warn', `Dropped ${entry.description}: the AH-Net session renewal took too long`)
+				entry.onDrop?.()
+				continue
+			}
+			try {
+				socket.write(entry.command)
+				this.log('debug', `${entry.description} sent after AH-Net session renewal`)
+			} catch (error) {
+				this.log('error', `Failed to ${entry.description}: ${error instanceof Error ? error.message : String(error)}`)
+			}
+		}
+	}
+
+	dropHeldAhNetCommands(reason: string): void {
+		this.ahNetRenewalInProgress = false
+		if (this.heldAhNetCommands.length === 0) return
+		const held = this.heldAhNetCommands
+		this.heldAhNetCommands = []
+		for (const entry of held) {
+			this.log('warn', `Cannot ${entry.description}: ${reason}`)
+			entry.onDrop?.()
+		}
+	}
+
+	/**
+	 * Writes an AH-Net command, or holds it during a lease renewal. `onDrop` restores
+	 * any optimistic display update if a held command is never sent.
+	 */
+	writeAhNetCommand(command: Buffer, description: string, onDrop?: () => void): boolean {
 		const socket = this.ahNetSocket
+		if (!this.isAhNetConnectionReady() && this.canHoldAhNetCommands()) {
+			if (this.heldAhNetCommands.length >= MAX_HELD_AHNET_COMMANDS) {
+				this.log('warn', `Cannot ${description}: too many commands are waiting for the AH-Net session renewal`)
+				return false
+			}
+			this.heldAhNetCommands.push({ command: Buffer.from(command), description, heldAt: Date.now(), onDrop })
+			this.log('debug', `${description} held until the AH-Net session renewal completes`)
+			return true
+		}
 		if (!this.isAhNetConnectionReady() || !socket) {
 			this.log('warn', `Cannot ${description}: console synchronization is not connected`)
 			return false

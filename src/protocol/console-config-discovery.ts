@@ -35,7 +35,9 @@ export function buildNamedManagerDiscoveryMessage(nameValue: string, handle: num
 }
 
 export function parseConsoleConfigManagerDiscoveryFrame(frame: Buffer): number | undefined {
-	return parseNamedManagerDiscoveryFrame(frame, CONSOLE_CONFIG_DISCOVERY_HANDLE)
+	const family = parseNamedManagerDiscoveryFrame(frame, CONSOLE_CONFIG_DISCOVERY_HANDLE)
+	// Family 0 cannot address a manager (the sync builder rejects it), so treat it as not discovered.
+	return family === 0 ? undefined : family
 }
 
 export function parseNamedManagerDiscoveryFrame(frame: Buffer, handle: number): number | undefined {
